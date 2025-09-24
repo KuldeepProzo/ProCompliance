@@ -36,7 +36,7 @@
           <li><a href="#/dashboard">Dashboard</a></li>
           <li><a href="#/export">Export</a></li>
           <li><a href="#/import">Import</a></li>
-          <li><a href="#/standards">Standard Compliances</a></li>
+          <li><a href="#/standards">Compliance Builder</a></li>
           <li class="muted" aria-hidden="true"><hr></li>
           <li><a href="#/settings">Settings</a></li>
         </ul>
@@ -262,7 +262,7 @@
             <div class="span-2 attachment">
               <span>Attachments</span>
               <input id="fFiles" type="file" multiple aria-describedby="fileHelp">
-              <small id="fileHelp">Total size <= 5MB</small>
+              <small id="fileHelp">Total size should not exceed 5MB</small>
               <div id="filePreview" class="file-preview" aria-live="polite"></div>
               <div id="fileList" class="file-preview" aria-live="polite"></div>
             </div>
@@ -540,7 +540,7 @@
       <!-- Standards Panel -->
       <section id="panelStandards" class="card" hidden>
         <header class="card-header">
-          <h2 class="card-title">Standard Compliances</h2>
+          <h2 class="card-title">Compliance Master</h2>
           <div class="actions">
             <button id="backFromStandards" class="btn">Back</button>
           </div>
@@ -553,7 +553,7 @@
             </table>
           </div>
           <hr>
-          <h3>Apply Standards</h3>
+          <h3>Site Builder</h3>
           <form id="stdApplyForm" class="grid" style="grid-template-columns:repeat(2,1fr)">
             <label>
               <span>Location / Site</span>

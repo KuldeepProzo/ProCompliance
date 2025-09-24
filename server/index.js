@@ -850,7 +850,7 @@ async function sendReminderEmail(task){
     .filter(Boolean).join(',');
   if(!to) return false;
   const subject = `[Reminder] ${task.title} ${task.due_date && String(task.due_date).toUpperCase()!=='NA'? 'due '+task.due_date : ''}`.trim();
-  const body = `Title: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://localhost:${PORT}#/edit/${task.id}`;
+  const body = `Title: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://procompliance.duckdns.org:8080/#/edit/${task.id}`;
   try{
     const info = await mailer.sendMail({ from: {
       name: "ProCompliance",
@@ -865,7 +865,7 @@ function htmlEscape(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,
 function buildTasksTable(tasks){
   const rows = tasks.map(t=>{
     const statusLabel = (String(t.status)==='completed') ? 'Renewal Needed' : 'Pending';
-    const url = `http://localhost:${PORT}#/edit/${t.id}`;
+    const url = `http://procompliance.duckdns.org:8080/#/edit/${t.id}`;
     return `<tr>
       <td><a href="${url}">${htmlEscape(t.title)}</a></td>
       <td>${htmlEscape(t.company||'')}</td>
@@ -1285,7 +1285,7 @@ app.delete('/api/attachments/:id', auth, (req, res) => {
 app.use('/', express.static(path.join(__dirname, '..')));
 
 app.listen(PORT, () => {
-  console.log(`ProCompliance server listening on http://localhost:${PORT}`);
+  console.log(`ProCompliance server listening on http://procompliance.duckdns.org:8080`);
 });
 
 function getTaskWithJoins(id){
@@ -1305,7 +1305,7 @@ async function sendAssignmentNotification(task){
   const salutation = `Hi ${name},`;
   const intro = 'You have been assigned a new compliance. Please review the details below.';
   const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can open the compliance by clicking its title.</p>\n  </div>`;
-  const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://localhost:${PORT}#/edit/${task.id}`;
+  const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://procompliance.duckdns.org:8080/#/edit/${task.id}`;
   const subject = `[Assigned] ${task.title}`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
@@ -1318,7 +1318,7 @@ async function sendReopenForEditsNotification(task, actorName){
   const salutation = `Hi ${name},`;
   const intro = `${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.`;
   const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can open the compliance by clicking its title.</p>\n  </div>`;
-  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://localhost:${PORT}#/edit/${task.id}`;
+  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://procompliance.duckdns.org:8080/#/edit/${task.id}`;
   const subject = `[Reopened for Edits] ${task.title}`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
@@ -1364,7 +1364,7 @@ app.post('/api/auth/forgot', passwordLimiter, (req, res) => {
     console.log('[auth/forgot] token stored', { userId: u.id, expires });
   }catch(e){ console.error('[auth/forgot] failed to store token', e); return res.status(500).json({ error: 'db_error' }); }
   if(!mailer){ console.warn('[auth/forgot] mailer not configured; skipping email'); return res.json({ ok: true, mailed: false }); }
-  const resetUrl = `http://localhost:${PORT}#/reset/${encodeURIComponent(token)}`;
+  const resetUrl = `http://procompliance.duckdns.org:8080/#/reset/${encodeURIComponent(token)}`;
   const subject = 'Password Reset - ProCompliance';
   const text = `Hi ${u.name},\n\nWe received a request to reset your password.\n\nReset link (valid for 1 hour): ${resetUrl}\n\nIf you did not request this, you can ignore this email.`;
   mailer.sendMail({ from:{ name: 'ProCompliance', address: SMTP_FROM }, to: u.email, subject, text })
