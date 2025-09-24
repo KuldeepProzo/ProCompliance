@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# env/secrets
+.env
+.env.*
+
+# sqlite db + journals
+server/data/*.db
+server/data/*.db-*
+server/data/*.sqlite
+server/data/*.sqlite-*
+
+# uploads
+server/uploads/**
+
+# logs/temp
+*.log
+npm-debug.log*
+yarn-error.log*
+*.tmp
+
+# backups/archives
+/backups/**
+*.tar.gz
+*.zip
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db

@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProCompliance – All Tasks</title>
+  <meta name="description" content="Track, assign, and complete compliances (tasks) with filters, assignments, due dates, repeating schedules, attachments, and notes.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" role="banner">
+    <div class="container header-bar">
+      <div class="brand">
+        <img src="ProCompliance_logo.png" alt="ProCompliance" class="brand-logo" style="height:28px">
+        <span class="brand-name">ProCompliance</span>
+      </div>
+      <nav class="user-nav" aria-label="User">
+        <button id="menuToggle" class="icon-btn" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+        <span id="currentUser" style="margin-left:8px"></span>
+        <button id="loginBtn" class="btn" style="margin-left:8px">Login</button>
+        <button id="logoutBtn" class="btn" style="margin-left:8px; display:none;">Logout</button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container layout">
+    <aside class="sidebar" id="sidebar" aria-label="Primary">
+      <nav>
+        <ul class="menu">
+          <li><a class="active" href="#/tasks">All Tasks</a></li>
+          <li><a href="#/dashboard">Dashboard</a></li>
+          <li><a href="#/export">Export</a></li>
+          <li><a href="#/import">Import</a></li>
+          <li><a href="#/standards">Standard Compliances</a></li>
+          <li class="muted" aria-hidden="true"><hr></li>
+          <li><a href="#/settings">Settings</a></li>
+        </ul>
+      </nav>
+      <footer class="sidebar-footer">
+        <small>© <span id="year"></span> ProCompliance</small>
+      </footer>
+    </aside>
+
+    <main id="main" class="content" role="main">
+      <section class="card">
+        <header class="card-header">
+          <h1 class="card-title">All Tasks</h1>
+          <div class="actions">
+            <button id="toggleSearch" class="btn secondary" aria-expanded="false" aria-controls="searchPanel">Filters</button>
+            <button id="addTaskBtn" class="btn primary">Add Compliance</button>
+          </div>
+        </header>
+
+        <div id="searchPanel" class="search-panel" hidden>
+          <form id="searchForm" class="grid" aria-label="Filter compliances">
+            <label>
+              <span>Title</span>
+              <input id="qTitle" name="title" type="text" placeholder="Search title">
+            </label>
+            <label>
+              <span>Assignee</span>
+              <select id="qAssignee" name="assignee">
+                <option value="">Any</option>
+              </select>
+            </label>
+            <label>
+              <span>Category</span>
+              <select id="qCategory" name="category">
+                <option value="">Any</option>
+              </select>
+            </label>
+            <label>
+              <span>Location / Site</span>
+              <select id="qCompany" name="company">
+                <option value="">Any</option>
+              </select>
+            </label>
+            <label>
+              <span>From</span>
+              <input id="qFrom" name="from" type="date">
+            </label>
+            <label>
+              <span>To</span>
+              <input id="qTo" name="to" type="date">
+            </label>
+            <label>
+              <span>Status</span>
+              <select id="qStatus" name="status">
+                <option value="">Any</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+            <div class="grid-actions">
+              <button class="btn primary" type="submit">Apply</button>
+              <button class="btn" type="reset" id="resetFilters">Reset</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" aria-controls="panelForMe" id="tabForMe">For Me (<span id="countForMe" class="count">0</span>)</button>
+          <button role="tab" aria-selected="false" aria-controls="panelByMe" id="tabByMe">Others (<span id="countByMe" class="count">0</span>)</button>
+        </div>
+
+        <div class="tab-panels">
+          <section id="panelForMe" role="tabpanel" aria-labelledby="tabForMe">
+            <div class="table-wrap">
+              <table class="table" aria-describedby="forMeSummary">
+                <caption id="forMeSummary" class="sr-only">Compliances assigned to me</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Action</th>
+                    <th scope="col"><button class="th-sort" data-sort="company">Location / Site</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="category">Category</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="title">Title</button></th>
+                    <th scope="col">Criticality</th>
+                    <th scope="col"><button class="th-sort" data-sort="dueDate">Due Date</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="assignee">Maker</button></th>
+                    <th scope="col">Checker</th>
+                    <th scope="col"><button class="th-sort" data-sort="status">Status</button></th>
+                  </tr>
+                </thead>
+                <tbody id="listForMe"></tbody>
+              </table>
+            </div>
+          </section>
+          <section id="panelByMe" role="tabpanel" aria-labelledby="tabByMe" hidden>
+            <div class="table-wrap">
+              <table class="table" aria-describedby="byMeSummary">
+                <caption id="byMeSummary" class="sr-only">Other compliances</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Action</th>
+                    <th scope="col"><button class="th-sort" data-sort="company">Location / Site</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="category">Category</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="title">Title</button></th>
+                    <th scope="col">Criticality</th>
+                    <th scope="col"><button class="th-sort" data-sort="dueDate">Due Date</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="assignee">Maker</button></th>
+                    <th scope="col">Checker</th>
+                    <th scope="col"><button class="th-sort" data-sort="status">Status</button></th>
+                  </tr>
+                </thead>
+                <tbody id="listByMe"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="editor" class="card" hidden>
+        <header class="card-header">
+          <h2 id="editorTitle" class="card-title">Add Compliance</h2>
+          <div class="actions">
+            <button id="backToList" class="btn danger">Back to list</button>
+          </div>
+        </header>
+
+        <div class="alert info" id="fieldHint" role="status" aria-live="polite">Fields marked with * are required.</div>
+
+        <form id="taskForm" novalidate>
+          <input type="hidden" id="taskId">
+          <div class="grid">
+            <label>
+              <span>Title *</span>
+              <input id="fTitle" required type="text" placeholder="e.g., File GST return">
+            </label>
+
+            <label>
+              <span>Category *</span>
+              <select id="fCategory" required></select>
+            </label>
+
+            <label>
+              <span>Location / Site *</span>
+              <select id="fCompany" required></select>
+            </label>
+
+            <label class="span-2">
+              <span>Description</span>
+              <textarea id="fDesc" rows="3" placeholder="Details, links, or context"></textarea>
+            </label>
+
+            <label>
+              <span>Maker *</span>
+              <select id="fMaker" required></select>
+            </label>
+
+            <label>
+              <span>Checker</span>
+              <select id="fChecker"></select>
+            </label>
+
+            <label class="inline-na">
+              <span>Due Date</span>
+              <div class="na-wrap">
+                <input id="fDue" type="date">
+                <label class="na-toggle"><input id="fDueNA" type="checkbox"> <span>N/A</span></label>
+              </div>
+            </label>
+
+            <label>
+              <span>Repeat</span>
+              <select id="fRepeat">
+                <option value='{"frequency":null}'>Do not repeat</option>
+                <option value='{"frequency":"daily"}'>Daily</option>
+                <option value='{"frequency":"weekly"}'>Weekly (same weekday)</option>
+                <option value='{"frequency":"monthly"}'>Monthly (same date)</option>
+                <option value='{"frequency":"quarterly"}'>Quarterly</option>
+                <option value='{"frequency":"half_yearly"}'>Half-yearly</option>
+                <option value='{"frequency":"annually"}'>Yearly (same date)</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Valid From</span>
+              <input id="fValidFrom" type="date">
+            </label>
+
+            <label>
+              <span>Criticality</span>
+              <select id="fCriticality">
+                <option value="high">High</option>
+                <option value="medium" selected>Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Licence Owner</span>
+              <input id="fLicenseOwner" type="text" placeholder="Owner name">
+            </label>
+
+            <label>
+              <span>Relevant for FC</span>
+              <select id="fRelevantFc">
+                <option value="No">No</option>
+                <option value="Yes">Yes</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Displayed in FC</span>
+              <select id="fDisplayedFc">
+                <option value="">NA</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </label>
+            <label id="fcImageWrap" style="display:none">
+              <span>FC Image (required when Yes)</span>
+              <input id="fFcImage" type="file" accept="image/*">
+            </label>
+
+            <div class="span-2 attachment">
+              <span>Attachments</span>
+              <input id="fFiles" type="file" multiple aria-describedby="fileHelp">
+              <small id="fileHelp">Total size <= 5MB</small>
+              <div id="filePreview" class="file-preview" aria-live="polite"></div>
+              <div id="fileList" class="file-preview" aria-live="polite"></div>
+            </div>
+            
+          </div>
+
+          <div class="form-actions">
+            <button class="btn primary" type="submit" id="saveBtn">Create</button>
+            <button class="btn" type="button" id="markCompleted">Mark completed</button>
+            <button class="btn" type="button" id="markAborted">Reject</button>
+            <button class="btn" type="button" id="reopenPending">Reopen for edits</button>
+            <button class="btn" type="button" id="submitToChecker">Submit to checker</button>
+            <button class="btn danger" type="button" id="deleteTask">Delete</button>
+          </div>
+        </form>
+
+        <section id="notes" class="notes" hidden>
+          <h3>Notes</h3>
+          <form id="noteForm" class="note-form">
+            <textarea id="noteText" rows="2" placeholder="Add a note..."></textarea>
+            <input id="noteFile" type="file" aria-label="Attach file to note">
+            <button class="btn primary" type="submit">Add Note</button>
+          </form>
+          <div id="noteList" class="note-list" aria-live="polite"></div>
+        </section>
+      </section>
+
+      <!-- Login Panel -->
+      <section id="panelLogin" class="auth-overlay" hidden>
+        <div class="auth-card">
+          <header>
+            <h2>Sign in</h2>
+          </header>
+          <div class="body">
+            <form id="loginForm" class="auth-form">
+              <label class="full">
+                <span>Email</span>
+                <input id="loginEmail" type="email" placeholder="you@example.com" required>
+              </label>
+              <label class="full">
+                <span>Password</span>
+                <input id="loginPassword" type="password" placeholder="••••••••" required>
+              </label>
+              <div class="auth-actions full">
+                <button class="btn primary" type="submit">Sign in</button>
+                <span class="spacer"></span>
+                <a href="#/forgot" id="forgotLink">Forgot password?</a>
+              </div>
+              <div id="loginError" class="alert full" style="display:none"></div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Forgot Password Panel -->
+      <section id="panelForgot" class="auth-overlay" hidden>
+        <div class="auth-card">
+          <header>
+            <h2>Forgot Password</h2>
+          </header>
+          <div class="body">
+            <form id="forgotForm" class="auth-form">
+              <label class="full">
+                <span>Email</span>
+                <input id="forgotEmail" type="email" placeholder="you@example.com" required>
+              </label>
+              <div class="auth-actions full">
+                <button class="btn" type="button" id="backFromForgot">Back</button>
+                <button class="btn primary" type="submit">Send reset link</button>
+              </div>
+              <div id="forgotMsg" class="alert full" style="display:none"></div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Reset Password Panel -->
+      <section id="panelReset" class="card" hidden>
+        <header class="card-header">
+          <h2 class="card-title">Reset Password</h2>
+        </header>
+        <div style="padding:16px">
+          <form id="resetForm" class="grid" style="grid-template-columns:repeat(2,1fr)">
+            <label>
+              <span>New Password</span>
+              <input id="resetPassword" type="password" placeholder="New password" required>
+            </label>
+            <div class="grid-actions">
+              <button class="btn" type="button" id="backFromReset">Back</button>
+              <button class="btn primary" type="submit">Update password</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Export Panel -->
+      <section id="panelExport" class="card" hidden>
+        <header class="card-header">
+          <h2 class="card-title">Export Compliances</h2>
+          <div class="actions">
+            <button id="backFromExport" class="btn">Back</button>
+          </div>
+        </header>
+        <div style="padding:16px">
+          <form id="exportFilters" class="grid" style="grid-template-columns:repeat(3,1fr)" aria-label="Export filters">
+            <label>
+              <span>Title</span>
+              <input id="xTitle" type="text" placeholder="Search title">
+            </label>
+            <label>
+              <span>Maker</span>
+              <select id="xMaker"><option value="">Any</option></select>
+            </label>
+            <label>
+              <span>Category</span>
+              <select id="xCategory"><option value="">Any</option></select>
+            </label>
+            <label>
+              <span>Location / Site</span>
+              <select id="xCompany"><option value="">Any</option></select>
+            </label>
+            <label>
+              <span>Status</span>
+              <select id="xStatus">
+                <option value="">Any</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+            <label>
+              <span>Due From</span>
+              <input id="xFrom" type="date">
+            </label>
+            <label>
+              <span>Due To</span>
+              <input id="xTo" type="date">
+            </label>
+            <div class="grid-actions">
+              <button id="exportCsv" class="btn primary" type="button">Download CSV</button>
+              <button class="btn" type="reset">Reset</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Dashboard Panel -->
+      <section id="panelDashboard" class="card" hidden>
+        <header class="card-header">
+          <h2 class="card-title">Dashboard</h2>
+          <div class="actions">
+            <button id="backFromDashboard" class="btn">Back</button>
+          </div>
+        </header>
+        <div style="padding:16px">
+          <form id="dashboardFilters" class="grid" style="grid-template-columns:repeat(3,1fr)">
+            <label>
+              <span>Status</span>
+              <select id="dStatus">
+                <option value="">Any</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+            <label>
+              <span>Category</span>
+              <select id="dCategory"></select>
+            </label>
+            <label>
+              <span>Location / Site</span>
+              <select id="dCompany"></select>
+            </label>
+            <label>
+              <span>Maker</span>
+              <select id="dAssignee"></select>
+            </label>
+            <label>
+              <span>Criticality</span>
+              <select id="dCriticality">
+                <option value="">Any</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <label>
+              <span>Due From</span>
+              <input id="dFrom" type="date">
+            </label>
+            <label>
+              <span>Due To</span>
+              <input id="dTo" type="date">
+            </label>
+            <div class="grid-actions">
+              <button class="btn primary" type="submit">Apply</button>
+              <button class="btn" type="reset" id="dReset">Reset</button>
+            </div>
+          </form>
+          <div class="stat-grid">
+            <div class="stat-card"><div class="stat-title">Overall Health</div><div class="stat-value" id="ovOverall">0%</div></div>
+            <div class="stat-card"><div class="stat-title">High Health</div><div class="stat-value" id="ovHigh">0%</div></div>
+            <div class="stat-card"><div class="stat-title">Medium Health</div><div class="stat-value" id="ovMedium">0%</div></div>
+            <div class="stat-card"><div class="stat-title">Low Health</div><div class="stat-value" id="ovLow">0%</div></div>
+          </div>
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>Location / Site Health</h3>
+                <button class="icon-btn chart-max" data-chart="dbOrgHealth" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbOrgHealth"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>Due Trend</h3>
+                <button class="icon-btn chart-max" data-chart="dbBucketBar" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbBucketBar"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>Status</h3>
+                <button class="icon-btn chart-max" data-chart="dbStatusPie" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbStatusPie"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>By Category</h3>
+                <button class="icon-btn chart-max" data-chart="dbCategoryBar" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbCategoryBar"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>By Location / Site</h3>
+                <button class="icon-btn chart-max" data-chart="dbCompanyBar" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbCompanyBar"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>Criticality</h3>
+                <button class="icon-btn chart-max" data-chart="dbCriticalityPie" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbCriticalityPie"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Import Panel -->
+      <section id="panelImport" class="card" hidden>
+        <header class="card-header">
+          <h2 class="card-title">Import Compliances</h2>
+          <div class="actions">
+            <button id="backFromImport" class="btn">Back</button>
+          </div>
+        </header>
+        <div style="padding:16px">
+          <form id="importForm">
+            <label>
+              <span>CSV File</span>
+              <input type="file" id="importFile" accept=".csv">
+            </label>
+            <div class="form-actions">
+              <button class="btn primary" type="submit">Import</button>
+              <button id="downloadImportTemplate" class="btn" type="button">Download Template CSV</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Standards Panel -->
+      <section id="panelStandards" class="card" hidden>
+        <header class="card-header">
+          <h2 class="card-title">Standard Compliances</h2>
+          <div class="actions">
+            <button id="backFromStandards" class="btn">Back</button>
+          </div>
+        </header>
+        <div style="padding:16px">
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Title</th><th>Category</th><th>Repeat</th><th>Criticality</th><th>Relevant FC</th><th>Action</th></tr></thead>
+              <tbody id="stdList"></tbody>
+            </table>
+          </div>
+          <hr>
+          <h3>Apply Standards</h3>
+          <form id="stdApplyForm" class="grid" style="grid-template-columns:repeat(2,1fr)">
+            <label>
+              <span>Location / Site</span>
+              <select id="stdApplyCompany"></select>
+            </label>
+            <label class="inline-na">
+              <span>Default Due Date</span>
+              <div class="na-wrap">
+                <input id="stdApplyDue" type="date">
+                <label class="na-toggle"><input id="stdApplyDueNA" type="checkbox"> <span>N/A</span></label>
+              </div>
+            </label>
+            <div class="span-2">
+              <div id="stdApplyItems"></div>
+            </div>
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">Apply Selected</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Settings Panel -->
+      <section id="panelSettings" class="card" hidden>
+        <header class="card-header">
+          <h2 class="card-title">Settings</h2>
+          <div class="actions">
+            <button id="backFromSettings" class="btn">Back</button>
+          </div>
+        </header>
+        <div style="padding:16px">
+          <div class="tabs" role="tablist">
+            <button role="tab" aria-selected="true" aria-controls="panelCategories" id="tabCategories">Categories</button>
+            <button role="tab" aria-selected="false" aria-controls="panelCompanies" id="tabCompanies">Locations / Sites</button>
+            <button role="tab" aria-selected="false" aria-controls="panelUsers" id="tabUsers">Users</button>
+            <button role="tab" aria-selected="false" aria-controls="panelReminderPolicies" id="tabReminderPolicies">Reminder Policies</button>
+          </div>
+          <section id="panelCategories" role="tabpanel" aria-labelledby="tabCategories">
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Name</th><th>Action</th></tr></thead>
+                <tbody id="catList"></tbody>
+              </table>
+            </div>
+            <form id="catForm" class="form-actions">
+              <input id="catName" type="text" placeholder="New category" required>
+              <button class="btn primary" type="submit">Add</button>
+            </form>
+          </section>
+          <section id="panelCompanies" role="tabpanel" aria-labelledby="tabCompanies" hidden>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Name</th><th>Action</th></tr></thead>
+                <tbody id="compList"></tbody>
+              </table>
+            </div>
+            <form id="compForm" class="form-actions">
+              <input id="compName" type="text" placeholder="New location/site" required>
+              <button class="btn primary" type="submit">Add</button>
+            </form>
+          </section>
+          <section id="panelUsers" role="tabpanel" aria-labelledby="tabUsers" hidden>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Categories (for Admin)</th><th>Action</th></tr></thead>
+                <tbody id="userList"></tbody>
+              </table>
+            </div>
+            <form id="userForm" class="form-actions">
+              <input id="userEmail" type="email" placeholder="Email" required>
+              <input id="userName" type="text" placeholder="Name" required>
+              <input id="userPassword" type="password" placeholder="Password" required>
+              <select id="userRole">
+                <option value="viewer">viewer</option>
+                <option value="admin">admin</option>
+                <option value="superadmin">superadmin</option>
+              </select>
+              <button class="btn primary" type="submit">Add User</button>
+            </form>
+          </section>
+          <section id="panelReminderPolicies" role="tabpanel" aria-labelledby="tabReminderPolicies" hidden>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Criticality</th><th>Start Before (days)</th><th>Action</th></tr></thead>
+                <tbody id="polList"></tbody>
+              </table>
+              <div class="form-actions">
+                <button id="runRemindersNow" class="btn">Run reminders now</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Chart Modal -->
+  <div id="chartModal" class="chart-modal" hidden aria-hidden="true">
+    <div class="chart-modal-card">
+      <header>
+        <h3 id="chartModalTitle">Chart</h3>
+        <button id="chartModalClose" class="icon-btn" aria-label="Close">✕</button>
+      </header>
+      <div class="chart-modal-body">
+        <canvas id="chartModalCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
+
