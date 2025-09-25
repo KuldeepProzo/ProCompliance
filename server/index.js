@@ -25,6 +25,8 @@ const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || 'no-reply@procompliance.local';
+const DEFAULT_PASSWORD = process.env.DEFAULT_PASSWORD || '';
+const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 // Ensure dirs
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -249,6 +251,11 @@ app.get('/api/meta', auth, (req, res) => {
   res.json({ categories: cats, companies: comps, people });
 });
 
+// Settings meta (admin): surface default password value to UI
+app.get('/api/admin/meta', auth, requireAdmin, (req, res) => {
+  res.json({ default_password: DEFAULT_PASSWORD || '' });
+});
+
 // Standards module
 db.exec(`CREATE TABLE IF NOT EXISTS standard_obligations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,7 +287,7 @@ app.delete('/api/standards/:id', auth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 // Apply standards to an organization with maker/checker
-app.post('/api/standards/apply', auth, requireAdmin, (req, res) => {
+app.post('/api/standards/apply', auth, requireAdmin, async (req, res) => {
   const { company_id, items } = req.body || {};
   const me = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.sub) || {};
   if(!company_id || !Array.isArray(items) || items.length===0) return res.status(400).json({ error: 'missing_fields' });
@@ -288,6 +295,7 @@ app.post('/api/standards/apply', auth, requireAdmin, (req, res) => {
                           VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`);
   const now = new Date().toISOString();
   let created = 0;
+  const createdByMaker = new Map(); // makerName -> [taskId]
   for(const it of items){
     const std = db.prepare('SELECT * FROM standard_obligations WHERE id = ?').get(Number(it.standard_id));
     if(!std) continue;
@@ -301,9 +309,25 @@ app.post('/api/standards/apply', auth, requireAdmin, (req, res) => {
     const relFc = (typeof std.relevant_fc === 'string')
       ? (String(std.relevant_fc).toLowerCase()==='yes' ? 1 : 0)
       : (std.relevant_fc ? 1 : 0);
-    ins.run(std.title, std.category_id||null, Number(company_id), makerName, checkerName, me.name||'', due, std.criticality||null, relFc, std.repeat_json||'{"frequency":null}', now, now);
+    const r = ins.run(std.title, std.category_id||null, Number(company_id), makerName, checkerName, me.name||'', due, std.criticality||null, relFc, std.repeat_json||'{"frequency":null}', now, now);
+    const taskId = r.lastInsertRowid;
+    if(makerName){ const arr = createdByMaker.get(makerName) || []; arr.push(taskId); createdByMaker.set(makerName, arr); }
     created++;
   }
+  // Grouped maker emails for created tasks (fire-and-forget)
+  (async ()=>{
+    if(mailer && createdByMaker.size>0){
+      for(const [makerName, ids] of createdByMaker.entries()){
+        try{
+          const maker = db.prepare('SELECT email,name FROM users WHERE name = ?').get(makerName||'');
+          const to = maker && maker.email; if(!to) continue;
+          const tasks = ids.map(id => getTaskWithJoins(id)).filter(Boolean);
+          console.log('[standards/apply] grouped assignment email attempt', { to, tasks: tasks.length });
+          if(tasks.length>0){ const ok = await sendGroupedEmail(to, makerName, tasks, 'assignment'); console.log('[standards/apply] grouped assignment email result', { to, ok }); }
+        }catch(e){ console.error('[standards/apply] grouped assignment email error', e); }
+      }
+    }
+  })();
   res.json({ created });
 });
 
@@ -393,13 +417,15 @@ app.get('/api/users', auth, requireAdmin, (req, res) => {
   }
   return res.json({ users: rows.map(u=> ({...u, categories: byUser.get(u.id)||[]})) });
 });
-app.post('/api/users', auth, requireAdmin, (req, res) => {
+app.post('/api/users', auth, requireAdmin, async (req, res) => {
   const creator = db.prepare('SELECT role FROM users WHERE id = ?').get(req.user.sub) || { role: 'viewer' };
   const creatorIsSuper = String(creator.role||'').toLowerCase()==='superadmin';
   const { email, name, password, role, categories } = req.body || {};
-  if(!email || !name || !password || !role) return res.status(400).json({ error: 'missing_fields' });
+  if(!email || !name || !role) return res.status(400).json({ error: 'missing_fields' });
   try{
-    const hash = bcrypt.hashSync(password, 10);
+    const pw = String(password||'') || DEFAULT_PASSWORD;
+    if(!pw){ return res.status(500).json({ error: 'default_password_not_set' }); }
+    const hash = bcrypt.hashSync(pw, 10);
     const rStr = String(role).toLowerCase();
     let normalizedRole = rStr==='superadmin' ? 'superadmin' : (rStr==='admin' ? 'admin' : 'viewer');
     if(!creatorIsSuper){
@@ -412,6 +438,8 @@ app.post('/api/users', auth, requireAdmin, (req, res) => {
       const ins = db.prepare('INSERT OR IGNORE INTO user_categories (user_id, category_id) VALUES (?, ?)');
       for(const cid of categories.map(Number)) ins.run(userId, cid);
     }
+    // Send registration email
+    try{ await sendUserRegistrationEmail(String(email).trim(), String(name).trim()); }catch(_e){}
     res.status(201).json({ id: userId });
   }catch(e){ return res.status(409).json({ error: 'duplicate' }); }
 });
@@ -735,7 +763,7 @@ app.get('/api/tasks/export', auth, (req, res) => {
 });
 
 // Import CSV
-app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), (req, res) => {
+app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), async (req, res) => {
   if(!req.file) return res.status(400).json({ error: 'file_required' });
   const content = fs.readFileSync(path.join(UPLOAD_DIR, req.file.filename), 'utf8');
   const lines = content.split(/\r?\n/).filter(Boolean);
@@ -744,6 +772,9 @@ app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), (r
   const idx = (name) => header.indexOf(name);
   let count = 0;
   const me = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.sub) || { name: '' };
+  // Track tasks by maker email (preferred) for grouped assignment mails
+  const createdByMakerEmail = new Map(); // emailLower -> { name, ids: number[] }
+  const newUsersCache = new Map(); // email(lower) -> user
   for(let i=1;i<lines.length;i++){
     const cols = parseCsvLine(lines[i]);
     const title = cols[idx('title')] || '';
@@ -751,13 +782,16 @@ app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), (r
     const description = cols[idx('description')] || '';
     const categoryName = cols[idx('category')] || '';
     const companyName = cols[idx('company')] || cols[idx('location / site')] || '';
-    let assignee = cols[idx('maker')] || cols[idx('assignee')] || 'Me';
-    if(assignee === 'Me') assignee = me.name || '';
-    const checker = cols[idx('checker')] || '';
-    // validate maker/checker exist as users; else blank
-    const nameOk = (n)=>{ if(!n) return false; const row = db.prepare('SELECT 1 as x FROM users WHERE name = ?').get(String(n)); return !!row; };
-    if(!nameOk(assignee)) assignee = '';
-    const checkerFinal = nameOk(checker) ? checker : '';
+    const makerEmail = cols[idx('maker_email')] || '';
+    const checkerEmail = cols[idx('checker_email')] || '';
+    // resolve maker by email; create viewer if not exists
+    let makerUser = makerEmail ? (newUsersCache.get(String(makerEmail).toLowerCase()) || findUserByEmail(makerEmail)) : null;
+    if(!makerUser && makerEmail){ try{ makerUser = createViewerUserByEmail(makerEmail); newUsersCache.set(String(makerEmail).toLowerCase(), makerUser); await sendUserRegistrationEmail(makerUser.email, makerUser.name); }catch(_e){} }
+    const assignee = (makerUser && makerUser.name) || '';
+    // resolve checker by email; create viewer if not exists
+    let checkerUser = checkerEmail ? (newUsersCache.get(String(checkerEmail).toLowerCase()) || findUserByEmail(checkerEmail)) : null;
+    if(!checkerUser && checkerEmail){ try{ checkerUser = createViewerUserByEmail(checkerEmail); newUsersCache.set(String(checkerEmail).toLowerCase(), checkerUser); await sendUserRegistrationEmail(checkerUser.email, checkerUser.name); }catch(_e){} }
+    const checkerFinal = (checkerUser && checkerUser.name) || '';
     let due_date = cols[idx('duedate')] || 'NA';
     // Accept dd-mm-yyyy and normalize to yyyy-mm-dd or 'NA'
     const normDate = (s)=>{
@@ -799,18 +833,38 @@ app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), (r
       company_id = c? c.id : db.prepare('INSERT INTO companies (name) VALUES (?)').run(companyName).lastInsertRowid;
     }
     const now = new Date().toISOString();
-    db.prepare(`INSERT INTO tasks (title, description, category_id, company_id, assignee, checker, assigned_by, due_date, valid_from, criticality, license_owner, relevant_fc, displayed_fc, repeat_json, status, created_at, updated_at)
+    const r = db.prepare(`INSERT INTO tasks (title, description, category_id, company_id, assignee, checker, assigned_by, due_date, valid_from, criticality, license_owner, relevant_fc, displayed_fc, repeat_json, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{"frequency":null}', ?, ?, ?)`)
       .run(title, description, category_id, company_id, assignee, checkerFinal||null, assigned_by, due_date, valid_from||null, criticality||null, license_owner||null, String(relevant_fc).toLowerCase()==='yes'?1:0, displayed_fc||null, status, now, now);
+    const taskId = r.lastInsertRowid;
+    if(makerEmail){
+      const emailKey = String(makerEmail).trim().toLowerCase();
+      if(emailKey){ const entry = createdByMakerEmail.get(emailKey) || { name: assignee, ids: [] }; entry.name = assignee || entry.name; entry.ids.push(taskId); createdByMakerEmail.set(emailKey, entry); }
+    }
     count++;
   }
+  // Grouped emails to makers if their email is available (fire-and-forget)
+  (async ()=>{
+    if(mailer && createdByMakerEmail.size>0){
+      for(const [emailLower, entry] of createdByMakerEmail.entries()){
+        try{
+          const to = emailLower;
+          const tasks = (entry.ids||[]).map(id => getTaskWithJoins(id)).filter(Boolean);
+          console.log('[import] grouped assignment email attempt', { to, tasks: tasks.length });
+          if(tasks.length>0){ const ok = await sendGroupedEmail(to, entry.name||'there', tasks, 'assignment'); console.log('[import] grouped assignment email result', { to, ok }); }
+        }catch(e){ console.error('[import] grouped assignment email error', e); }
+      }
+    } else {
+      if(!mailer) console.warn('[import] mailer not configured; skipping grouped assignment emails');
+    }
+  })();
   res.json({ imported: count });
 });
 
 // Import template CSV (header only) - excludes AssignedBy, CreatedAt, Status per requirements
 app.get('/api/tasks/import/template', auth, requireSuperAdmin, (req, res) => {
   const header = [
-    'Title','Description','Category','Location / Site','Maker','Checker','DueDate','ValidFrom','Criticality','LicenseOwner','RelevantFC','DisplayedFC'
+    'Title','Description','Category','Location / Site','Maker_email','Checker_email','DueDate','ValidFrom','Criticality','LicenseOwner','RelevantFC','DisplayedFC'
   ];
   const csv = header.join(',') + '\n';
   res.setHeader('Content-Type', 'text/csv');
@@ -819,7 +873,20 @@ app.get('/api/tasks/import/template', auth, requireSuperAdmin, (req, res) => {
 });
 
 // Email transport and reminders (reintroduced)
-const mailer = (SMTP_HOST && SMTP_USER) ? nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT===465, auth: { user: SMTP_USER, pass: SMTP_PASS } }) : null;
+// const mailer = (SMTP_HOST && SMTP_USER) ? nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT===465, auth: { user: SMTP_USER, pass: SMTP_PASS } }) : null;
+const mailer = (SMTP_HOST && SMTP_USER)
+  ? nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+      pool: true,
+      maxConnections: 5,    // parallel connections
+      maxMessages: 100,     // per connection
+      rateLimit: 10         // messages per second
+    })
+  : null;
+
 
 function shouldSendToday(policy, daysUntil){
   if(daysUntil === 0) return true; // on due
@@ -850,7 +917,7 @@ async function sendReminderEmail(task){
     .filter(Boolean).join(',');
   if(!to) return false;
   const subject = `[Reminder] ${task.title} ${task.due_date && String(task.due_date).toUpperCase()!=='NA'? 'due '+task.due_date : ''}`.trim();
-  const body = `Title: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://procompliance.duckdns.org:8080/#/edit/${task.id}`;
+  const body = `Title: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/tasks to view compliances.`;
   try{
     const info = await mailer.sendMail({ from: {
       name: "ProCompliance",
@@ -860,14 +927,54 @@ async function sendReminderEmail(task){
   }catch(_e){ return false; }
 }
 
+function titleCaseNameFromEmail(email){
+  const local = String(email||'').split('@')[0] || '';
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  const name = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+  return name || (String(email||'').split('@')[0]||'User');
+}
+
+async function sendUserRegistrationEmail(to, name){
+  if(!mailer || !to) return false;
+  const salutation = `Hi ${name||'there'},`;
+  const intro = `You have been registered on ProCompliance.`;
+  const bodyLines = [
+    `Login URL: ${APP_URL}`,
+    `Email: ${to}`,
+    `Temporary password: ${DEFAULT_PASSWORD}`,
+    `Please click "Forgot password" on the login page and reset your password after first login.`
+  ];
+  const text = `${salutation}\n\n${intro}\n\n${bodyLines.join('\n')}\n`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;">
+    <p>${htmlEscape(salutation)}</p>
+    <p>${htmlEscape(intro)}</p>
+    <p><strong>Login URL:</strong> <a href="${APP_URL}">${APP_URL}</a><br>
+    <strong>Email:</strong> ${htmlEscape(to)}<br>
+    <strong>Temporary password:</strong> ${htmlEscape(DEFAULT_PASSWORD)}</p>
+    <p>Please click "Forgot password" on the login page and reset your password after first login.</p>
+  </div>`;
+  const subject = 'Welcome to ProCompliance';
+  try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
+}
+
+function findUserByEmail(email){ return db.prepare('SELECT id, email, name, role FROM users WHERE lower(email)=lower(?)').get(String(email||'')); }
+
+function createViewerUserByEmail(email){
+  const nm = titleCaseNameFromEmail(email);
+  if(!DEFAULT_PASSWORD){ throw new Error('DEFAULT_PASSWORD not set'); }
+  const hash = bcrypt.hashSync(DEFAULT_PASSWORD, 10);
+  const r = db.prepare('INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)')
+    .run(String(email).trim(), hash, nm, 'viewer');
+  return { id: r.lastInsertRowid, email: String(email).trim(), name: nm, role: 'viewer' };
+}
+
 // Grouped email helpers
 function htmlEscape(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function buildTasksTable(tasks){
   const rows = tasks.map(t=>{
     const statusLabel = (String(t.status)==='completed') ? 'Renewal Needed' : 'Pending';
-    const url = `http://procompliance.duckdns.org:8080/#/edit/${t.id}`;
     return `<tr>
-      <td><a href="${url}">${htmlEscape(t.title)}</a></td>
+      <td>${htmlEscape(t.title)}</td>
       <td>${htmlEscape(t.company||'')}</td>
       <td>${htmlEscape(t.category||'')}</td>
       <td>${htmlEscape(t.assignee||'')}</td>
@@ -894,17 +1001,24 @@ function buildTasksTable(tasks){
 async function sendGroupedEmail(to, recipientName, tasks, audience){
   if(!mailer || !to || !tasks || tasks.length===0) return false;
   const salutation = `Hi ${recipientName || 'there'},`;
-  const intro = audience==='admin'
-    ? 'Below are the compliances that need attention across the organization.'
-    : 'Below are the compliances which need your attention.';
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable(tasks)}\n    <p style=\"margin-top:16px;\">You can open a compliance by clicking its title.</p>\n  </div>`;
-  const subject = audience==='admin'
-    ? `[Reminder] ${tasks.length} compliances need attention`
-    : `[Reminder] ${tasks.length} compliances need your attention`;
+  const intro = (audience==='assignment')
+    ? 'You have been assigned the following new compliances.'
+    : (audience==='admin'
+      ? 'Below are the compliances that need attention across the organization.'
+      : 'Below are the compliances which need your attention.');
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/tasks')} to view these compliances.</p>\n    ${buildTasksTable(tasks)}\n  </div>`;
+  const subject = (audience==='assignment')
+    ? `[Assigned] ${tasks.length} new compliances`
+    : (audience==='admin'
+      ? `[Reminder] ${tasks.length} compliances need attention`
+      : `[Reminder] ${tasks.length} compliances need your attention`);
   try{
+    console.log('[email] sendGroupedEmail attempt', { to, audience, count: tasks.length, subject });
     const info = await mailer.sendMail({ from: { name: 'ProCompliance', address: SMTP_FROM }, to, subject, html });
-    return !!(info && (info.accepted||[]).length);
-  }catch(_e){ return false; }
+    const ok = !!(info && (info.accepted||[]).length);
+    console.log('[email] sendGroupedEmail result', { to, ok, messageId: info && info.messageId, accepted: info && info.accepted, rejected: info && info.rejected, response: info && info.response });
+    return ok;
+  }catch(e){ console.error('[email] sendGroupedEmail error', e); return false; }
 }
 function computeDaysUntil(dateStr){
   const today = new Date(); const d = new Date(dateStr);
@@ -1022,22 +1136,26 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
   if(!existing) return res.status(404).json({ error: 'not_found' });
   // Allow admin or maker (assignee) to edit; checker cannot edit fields
   const me = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.user.sub) || {};
-  const isAdmin = String(me.role||'').toLowerCase() === 'admin';
+  const roleStr = String(me.role||'').toLowerCase();
+  const isSuper = roleStr === 'superadmin';
+  const isAdminOnly = roleStr === 'admin';
+  const isElevated = isSuper || isAdminOnly;
   const isMaker = existing.assignee === (me.name||'');
+  const adminHasCategory = isSuper || (isAdminOnly && hasCategoryAccess(req.user.sub, existing.category_id));
   // Lock edits for maker once submitted until explicitly reopened
-  if(existing.submitted_at && !isAdmin && !(existing.edit_unlocked)){ 
+  if(existing.submitted_at && !isElevated && !(existing.edit_unlocked)){ 
     return res.status(403).json({ error: 'locked_submitted' });
   }
-  if(!(isAdmin || isMaker)) return res.status(403).json({ error: 'forbidden' });
+  if(!(isMaker || (isElevated && adminHasCategory))) return res.status(403).json({ error: 'forbidden' });
   const body = req.body || {};
   const now = new Date().toISOString();
   // Do not allow changing assigned_by; keep the original assigning admin
   const nextAssignedBy = existing.assigned_by;
   let nextAssignee = String(body.assignee||existing.assignee) === 'Me' ? (me.name||'') : (body.assignee||existing.assignee);
-  if(!isAdmin) nextAssignee = existing.assignee; // maker cannot reassign
-  const nextChecker = isAdmin ? (body.checker || existing.checker) : existing.checker;
+  if(!isElevated) nextAssignee = existing.assignee; // maker cannot reassign
+  const nextChecker = isElevated ? (body.checker || existing.checker) : existing.checker;
   // enforce displayed_fc == 'Yes' requires at least one image
-  if(String(body.displayed_fc|| existing.displayed_fc || '').toLowerCase()==='yes'){
+  if(!isElevated && String(body.displayed_fc|| existing.displayed_fc || '').toLowerCase()==='yes'){
     const hasImageNew = (req.files||[]).some(f => (f.mimetype||'').startsWith('image/'));
     const hasImageExisting = db.prepare("SELECT COUNT(*) as c FROM attachments WHERE task_id = ? AND (file_type LIKE 'image/%')").get(id).c > 0;
     if(!(hasImageNew || hasImageExisting)) return res.status(400).json({ error: 'fc_image_required' });
@@ -1076,11 +1194,13 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
          'pending',
          now,
          id);
-  // if assignee changed, add an auto note
-  if(nextAssignee !== existing.assignee){
+  // if assignee changed, add an auto note and notify if already submitted
+  const assigneeChanged = nextAssignee !== existing.assignee;
+  if(assigneeChanged){
     db.prepare('INSERT INTO notes (task_id, text, created_at) VALUES (?, ?, ?)')
       .run(id, `Reassigned to ${nextAssignee} by ${nextAssignedBy}`, now);
   }
+  const checkerChanged = nextChecker !== existing.checker;
   // enforce total size <= 5MB
   const totalBytes = (req.files||[]).reduce((s,f)=> s+ (f.size||0), 0);
   if(totalBytes > 5 * 1024 * 1024){ return res.status(400).json({ error: 'attachments_too_large' }); }
@@ -1128,6 +1248,16 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
     // best-effort logging; ignore errors
   }
   res.json({ ok: true });
+  // fire-and-forget notifications on reassignment
+  (async ()=>{
+    try{
+      const full = getTaskWithJoins(id);
+      // Maker should always be notified on reassignment
+      if(assigneeChanged){ await sendAssignmentNotification(full); }
+      // Checker should be notified only if already submitted
+      if(checkerChanged && !!existing.submitted_at){ await sendSubmissionNotification(full); }
+    }catch(_e){}
+  })();
 });
 
 app.post('/api/tasks/:id/status', auth, (req, res) => {
@@ -1285,7 +1415,7 @@ app.delete('/api/attachments/:id', auth, (req, res) => {
 app.use('/', express.static(path.join(__dirname, '..')));
 
 app.listen(PORT, () => {
-  console.log(`ProCompliance server listening on http://procompliance.duckdns.org:8080`);
+  console.log(`ProCompliance server listening on http://localhost:${PORT}`);
 });
 
 function getTaskWithJoins(id){
@@ -1304,10 +1434,16 @@ async function sendAssignmentNotification(task){
   if(!to) return false;
   const salutation = `Hi ${name},`;
   const intro = 'You have been assigned a new compliance. Please review the details below.';
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can open the compliance by clicking its title.</p>\n  </div>`;
-  const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://procompliance.duckdns.org:8080/#/edit/${task.id}`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/edit/' + task.id)} to view this compliance.</p>\n  </div>`;
+  const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to view this compliance.`;
   const subject = `[Assigned] ${task.title}`;
-  try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
+  try{
+    console.log('[email] sendAssignmentNotification attempt', { to, taskId: task.id, assignee: task.assignee });
+    const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text });
+    const ok = !!(info && (info.accepted||[]).length);
+    console.log('[email] sendAssignmentNotification result', { to, ok, messageId: info && info.messageId, accepted: info && info.accepted, rejected: info && info.rejected, response: info && info.response });
+    return ok;
+  }catch(e){ console.error('[email] sendAssignmentNotification error', e); return false; }
 }
 async function sendReopenForEditsNotification(task, actorName){
   if(!mailer || !task) return false;
@@ -1317,8 +1453,8 @@ async function sendReopenForEditsNotification(task, actorName){
   const name = (maker && maker.name) || task.assignee || '';
   const salutation = `Hi ${name},`;
   const intro = `${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.`;
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can open the compliance by clicking its title.</p>\n  </div>`;
-  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nOpen: http://procompliance.duckdns.org:8080/#/edit/${task.id}`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/edit/' + task.id)} to edit this compliance.</p>\n  </div>`;
+  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to edit this compliance.`;
   const subject = `[Reopened for Edits] ${task.title}`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
@@ -1329,7 +1465,7 @@ async function sendSubmissionNotification(task){
   if(!to) return false;
   const salutation = `Hi ${name},`;
   const intro = 'A compliance has been submitted for your review.';
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can open the compliance by clicking its title.</p>\n  </div>`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/edit/' + task.id)} to review this compliance.</p>\n  </div>`;
   const subject = `[Action Required] ${task.title} submitted for review`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
@@ -1364,7 +1500,7 @@ app.post('/api/auth/forgot', passwordLimiter, (req, res) => {
     console.log('[auth/forgot] token stored', { userId: u.id, expires });
   }catch(e){ console.error('[auth/forgot] failed to store token', e); return res.status(500).json({ error: 'db_error' }); }
   if(!mailer){ console.warn('[auth/forgot] mailer not configured; skipping email'); return res.json({ ok: true, mailed: false }); }
-  const resetUrl = `http://procompliance.duckdns.org:8080/#/reset/${encodeURIComponent(token)}`;
+  const resetUrl = `${APP_URL}/#/reset/${encodeURIComponent(token)}`;
   const subject = 'Password Reset - ProCompliance';
   const text = `Hi ${u.name},\n\nWe received a request to reset your password.\n\nReset link (valid for 1 hour): ${resetUrl}\n\nIf you did not request this, you can ignore this email.`;
   mailer.sendMail({ from:{ name: 'ProCompliance', address: SMTP_FROM }, to: u.email, subject, text })

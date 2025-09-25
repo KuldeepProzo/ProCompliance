@@ -272,7 +272,7 @@
       dueNA.addEventListener('change', ()=>{
         const isNA = dueNA.checked;
         const inlineNa = qs('label.inline-na'); if(inlineNa) inlineNa.classList.toggle('na-selected', isNA);
-        const date = el('fDue'); if(date) date.disabled = isNA;
+        const date = el('fDue'); if(date){ date.disabled = isNA; if(isNA){ date.value=''; } }
       });
     }
     const dfcSel = el('fDisplayedFc'); if(dfcSel){
@@ -509,7 +509,7 @@
       // header with select all
       const hdr=document.createElement('div'); hdr.className='grid'; hdr.style.gridTemplateColumns='auto 1fr 1fr 1fr 1fr'; hdr.style.gap='8px';
       hdr.innerHTML = `<div><label class="na-toggle"><input type="checkbox" id="stdSelectAll" checked> <span>Select all</span></label></div>
-        <div><strong>Standard</strong></div>
+        <div><strong>Compliance</strong></div>
         <div><strong>Maker</strong></div>
         <div><strong>Checker</strong></div>
         <div><strong>Due Date</strong></div>`;
@@ -553,6 +553,7 @@
     const af = el('stdApplyForm'); if(af && !af._bound){
       af.addEventListener('submit', async (e)=>{
         e.preventDefault();
+        if(af._busy) return; af._busy = true;
         const company_id = el('stdApplyCompany').value;
         const defaultDue = el('stdApplyDueNA') && el('stdApplyDueNA').checked ? 'NA' : el('stdApplyDue').value;
         const selected = Array.from((el('stdApplyItems')||{querySelectorAll:()=>[]}).querySelectorAll('[data-select]')).filter(cb => cb.checked);
@@ -564,9 +565,15 @@
           if(!due_date) due_date = 'NA';
           return { standard_id: Number(sid), maker, checker, due_date };
         });
-        if(items.length===0){ return toast('Select at least one standard'); }
-        const resp = await fetch('/api/standards/apply', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ company_id, items }) });
-        if(resp.ok){ const j = await resp.json(); toast(`Created ${j.created} compliances`); showList(); } else { toast('Apply failed'); }
+        if(items.length===0){ af._busy=false; return toast('Select at least one compliance'); }
+        const submitBtn = af.querySelector('button[type="submit"]');
+        if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Creating…'; }
+        try{
+          const resp = await fetch('/api/standards/apply', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ company_id, items }) });
+          if(resp.ok){ const j = await resp.json(); toast(`Created ${j.created} compliances`); showList(); }
+          else { toast('Apply failed'); }
+        }catch(_e){ toast('Apply failed'); }
+        finally{ if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = 'Apply Selected'; } af._busy=false; }
       });
       af._bound = true;
     }
@@ -577,7 +584,7 @@
         const isNA = stdDueNA.checked;
         const inlineNa = document.querySelector('#stdApplyForm label.inline-na');
         if(inlineNa) inlineNa.classList.toggle('na-selected', isNA);
-        const date = el('stdApplyDue'); if(date) date.disabled = isNA;
+        const date = el('stdApplyDue'); if(date){ date.disabled = isNA; if(isNA){ date.value=''; } }
       });
       stdDueNA._bound = true;
     }
@@ -1079,7 +1086,10 @@
     const submitBtn = e.currentTarget.querySelector('button[type="submit"]'); if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Importing…'; }
     const fd = new FormData(); fd.append('file', file);
     const r = await fetch('/api/tasks/import', { method:'POST', headers:{ Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: fd });
-    if(r.ok){ const d = await r.json(); toast(`Imported ${d.imported} rows`); } else { toast('Import failed'); }
+    if(r.ok){
+      const d = await r.json(); toast(`Imported ${d.imported} rows`);
+      const inp = document.getElementById('importFile'); if(inp){ inp.value = ''; }
+    } else { toast('Import failed'); }
     if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = 'Import'; }
   }
 
@@ -1087,10 +1097,11 @@
   async function loadSettings(){
     if(!sessionStorage.getItem('cf_token')) return;
     const ver = ++settingsLoadVersion;
-    const [cats, comps, users] = await Promise.all([
+    const [cats, comps, users, adminMeta] = await Promise.all([
       fetch('/api/categories', { headers:{ Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` } }).then(r=>r.json()),
       fetch('/api/companies', { headers:{ Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` } }).then(r=>r.json()),
       fetch('/api/users', { headers:{ Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` } }).then(r=>r.json()),
+      fetch('/api/admin/meta', { headers:{ Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` } }).then(r=>r.json()).catch(()=>({})),
     ]);
     if(ver !== settingsLoadVersion) return; // drop stale render
     // render
@@ -1128,6 +1139,13 @@
         </td>`;
       userList.appendChild(tr);
     });
+
+    // Set default password hint and input value from server meta
+    const pwInput = document.getElementById('userPassword');
+    const pwHint = document.getElementById('defaultPwHint');
+    const dpw = (adminMeta && adminMeta.default_password) || '';
+    if(pwInput){ pwInput.value = dpw; }
+    if(pwHint){ pwHint.textContent = dpw ? `default password: ${dpw}` : ''; }
 
     // delete handlers
     catList.querySelectorAll('button[data-type="cat"]').forEach(b=> b.addEventListener('click', async (e)=>{
@@ -1222,9 +1240,9 @@
     e.preventDefault(); e.stopPropagation();
     const email = el('userEmail').value.trim();
     const name = el('userName').value.trim();
-    const password = el('userPassword').value;
+    const password = el('userPassword').value || '';
     const role = el('userRole').value;
-    if(!email || !name || !password) return;
+    if(!email || !name) return;
     const me = await api.me(); const isSuperAdmin = me.user && me.user.role==='superadmin';
     // Admins can only create viewer users
     if(!isSuperAdmin && role !== 'viewer'){ toast('Admins can only add viewer users'); return; }
@@ -1338,6 +1356,41 @@
       return toast('Attachment required');
     }
 
+    // Prevent updates when nothing changed (fields AND attachments)
+    let hasFieldChanges = false;
+    if(id){
+      try{
+        const data = await api.get(id);
+        const t0 = (data && data.task) || {};
+        const normalizeYesNo = (v)=> String(v||'').toLowerCase()==='yes' ? 1 : 0;
+        const newCatId = categoryId && categoryId!=='__ADD__' ? Number(categoryId) : (t0.category_id||null);
+        const newComId = companyId && companyId!=='__ADD__' ? Number(companyId) : (t0.company_id||null);
+        const effMaker = assignee==='Me' ? currentUserName : assignee;
+        const effChecker = checker==='Me' ? currentUserName : checker;
+        const newRel = normalizeYesNo(relevantFc);
+        const newDisp = displayedFc || null;
+        const newRepeat = JSON.stringify(repeat);
+        const checks = [
+          [String(t0.title||''), String(title||'')],
+          [String(t0.description||''), String(description||'')],
+          [Number(t0.category_id||0), Number(newCatId||0)],
+          [Number(t0.company_id||0), Number(newComId||0)],
+          [String(t0.assignee||''), String(effMaker||'')],
+          [String(t0.checker||''), String(effChecker||'')],
+          [String(t0.due_date||''), String(dueDate||'')],
+          [String(t0.valid_from||''), String(validFrom||'')],
+          [String(t0.criticality||''), String(criticality||'')],
+          [String(t0.license_owner||''), String(licenseOwner||'')],
+          [Number(t0.relevant_fc||0), Number(newRel||0)],
+          [String(t0.displayed_fc||''), String(newDisp||'')],
+          [String(t0.repeat_json||''), String(newRepeat||'')],
+        ];
+        hasFieldChanges = checks.some(([a,b]) => a !== b);
+      }catch(_e){ hasFieldChanges = true; }
+      const hasNewFiles = (newGeneralCount + newFcCount) > 0;
+      if(!hasFieldChanges && !hasNewFiles){ return toast('No changes detected'); }
+    }
+
     const fd = new FormData();
     fd.append('title', title);
     fd.append('description', description);
@@ -1398,7 +1451,10 @@
       setTasks(tasks);
     }
     toast(id ? 'Updated' : 'Created');
+    if(id){ toast("Don't forget to Submit to checker for review."); }
     const nextId = id || createdId;
+    // Clear file inputs to avoid re-upload on repeated saves
+    try{ if(fileInput) fileInput.value=''; if(fcImageInput) fcImageInput.value=''; }catch(_e){}
     if(nextId){ openEditor(nextId); }
     if(saveBtn){ saveBtn.disabled = false; }
   }

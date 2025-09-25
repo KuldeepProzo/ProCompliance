@@ -271,10 +271,10 @@
 
           <div class="form-actions">
             <button class="btn primary" type="submit" id="saveBtn">Create</button>
+            <button class="btn" type="button" id="submitToChecker">Submit to checker</button>
             <button class="btn" type="button" id="markCompleted">Mark completed</button>
             <button class="btn" type="button" id="markAborted">Reject</button>
             <button class="btn" type="button" id="reopenPending">Reopen for edits</button>
-            <button class="btn" type="button" id="submitToChecker">Submit to checker</button>
             <button class="btn danger" type="button" id="deleteTask">Delete</button>
           </div>
         </form>
@@ -625,7 +625,8 @@
             <form id="userForm" class="form-actions">
               <input id="userEmail" type="email" placeholder="Email" required>
               <input id="userName" type="text" placeholder="Name" required>
-              <input id="userPassword" type="password" placeholder="Password" required>
+              <input id="userPassword" type="password" placeholder="Password" readonly>
+              <small id="defaultPwHint" class="muted" style="font-size:12px"></small>
               <select id="userRole">
                 <option value="viewer">viewer</option>
                 <option value="admin">admin</option>
