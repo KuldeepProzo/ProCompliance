@@ -198,12 +198,13 @@
               <select id="fChecker"></select>
             </label>
 
-            <label class="inline-na">
-              <span>Due Date</span>
-              <div class="na-wrap">
-                <input id="fDue" type="date">
-                <label class="na-toggle"><input id="fDueNA" type="checkbox"> <span>N/A</span></label>
-              </div>
+            <label>
+              <span>Criticality</span>
+              <select id="fCriticality">
+                <option value="high">High</option>
+                <option value="medium" selected>Medium</option>
+                <option value="low">Low</option>
+              </select>
             </label>
 
             <label>
@@ -224,13 +225,12 @@
               <input id="fValidFrom" type="date">
             </label>
 
-            <label>
-              <span>Criticality</span>
-              <select id="fCriticality">
-                <option value="high">High</option>
-                <option value="medium" selected>Medium</option>
-                <option value="low">Low</option>
-              </select>
+            <label class="inline-na">
+              <span>Valid Till</span>
+              <div class="na-wrap">
+                <input id="fDue" type="date">
+                <label class="na-toggle"><input id="fDueNA" type="checkbox"> <span>N/A</span></label>
+              </div>
             </label>
 
             <label>
@@ -255,7 +255,7 @@
               </select>
             </label>
             <label id="fcImageWrap" style="display:none">
-              <span>FC Image (required when Yes)</span>
+              <span>FC Image</span>
               <input id="fFcImage" type="file" accept="image/*">
             </label>
 
@@ -271,11 +271,10 @@
 
           <div class="form-actions">
             <button class="btn primary" type="submit" id="saveBtn">Create</button>
-            <button class="btn" type="button" id="submitToChecker">Submit to checker</button>
-            <button class="btn" type="button" id="markCompleted">Mark completed</button>
-            <button class="btn" type="button" id="markAborted">Reject</button>
-            <button class="btn" type="button" id="reopenPending">Reopen for edits</button>
-            <button class="btn danger" type="button" id="deleteTask">Delete</button>
+            <button class="btn" type="button" id="markCompleted" style="display:none">Mark completed</button>
+            <button class="btn" type="button" id="markAborted" style="display:none">Reject</button>
+            <button class="btn" type="button" id="reopenPending" style="display:none">Reopen for edits</button>
+            <button class="btn danger" type="button" id="deleteTask" style="display:none">Delete</button>
           </div>
         </form>
 
@@ -548,7 +547,7 @@
         <div style="padding:16px">
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>Title</th><th>Category</th><th>Repeat</th><th>Criticality</th><th>Relevant FC</th><th>Action</th></tr></thead>
+              <thead><tr><th>Title</th><th>Category</th><th>Repeat</th><th>Criticality</th><th>Relevant FC</th><th>Displayed in FC</th><th>Action</th></tr></thead>
               <tbody id="stdList"></tbody>
             </table>
           </div>
@@ -570,7 +569,7 @@
               <div id="stdApplyItems"></div>
             </div>
             <div class="form-actions span-2">
-              <button class="btn primary" type="submit">Apply Selected</button>
+              <button class="btn primary" type="submit">Create Selected</button>
             </div>
           </form>
         </div>

@@ -264,22 +264,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS standard_obligations (
   repeat_json TEXT DEFAULT '{"frequency":null}',
   criticality TEXT,
   relevant_fc INTEGER DEFAULT 0,
+  displayed_fc TEXT,
   FOREIGN KEY(category_id) REFERENCES categories(id)
 )`);
 
+// Lightweight in-place migration: ensure new columns exist when upgrading without dropping DB
+try{
+  const cols = db.prepare("PRAGMA table_info('standard_obligations')").all();
+  const hasDisplayed = Array.isArray(cols) && cols.some(c => String(c.name) === 'displayed_fc');
+  if(!hasDisplayed){ db.prepare("ALTER TABLE standard_obligations ADD COLUMN displayed_fc TEXT").run(); }
+}catch(_e){}
+
 app.get('/api/standards', auth, requireAdmin, (req, res) => {
-  const rows = db.prepare(`SELECT s.id, s.title, s.repeat_json, s.criticality, s.relevant_fc, c.name AS category, s.category_id
+  const rows = db.prepare(`SELECT s.id, s.title, s.repeat_json, s.criticality, s.relevant_fc, s.displayed_fc, c.name AS category, s.category_id
                            FROM standard_obligations s LEFT JOIN categories c ON c.id = s.category_id ORDER BY s.id`).all();
   res.json({ standards: rows });
 });
 app.post('/api/standards', auth, requireAdmin, (req, res) => {
-  const { title, category_id, repeat_json='{"frequency":null}', criticality=null, relevant_fc=0 } = req.body || {};
+  const { title, category_id, repeat_json='{"frequency":null}', criticality=null, relevant_fc=0, displayed_fc='NA' } = req.body || {};
   if(!title) return res.status(400).json({ error: 'title_required' });
   const rel = (typeof relevant_fc === 'string')
     ? (String(relevant_fc).toLowerCase()==='yes' ? 1 : 0)
     : (relevant_fc ? 1 : 0);
-  const r = db.prepare('INSERT INTO standard_obligations (title, category_id, repeat_json, criticality, relevant_fc) VALUES (?, ?, ?, ?, ?)')
-    .run(String(title), category_id? Number(category_id): null, String(repeat_json), criticality||null, rel);
+  const r = db.prepare('INSERT INTO standard_obligations (title, category_id, repeat_json, criticality, relevant_fc, displayed_fc) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(String(title), category_id? Number(category_id): null, String(repeat_json), criticality||null, rel, displayed_fc||'NA');
   res.status(201).json({ id: r.lastInsertRowid });
 });
 app.delete('/api/standards/:id', auth, requireAdmin, (req, res) => {
@@ -302,7 +310,7 @@ app.post('/api/standards/apply', auth, requireAdmin, async (req, res) => {
     const due = it.due_date || 'NA';
     // validate maker/checker names against users
     let makerName = String(it.maker||'Me')==='Me'? me.name: (it.maker||'');
-    let checkerName = String(it.checker||'');
+    let checkerName = String(it.checker||'')==='Me' ? (me.name||'') : String(it.checker||'');
     const nameOk = (n)=>{ if(!n) return false; const row = db.prepare('SELECT 1 as x FROM users WHERE name = ?').get(String(n)); return !!row; };
     if(!nameOk(makerName)) makerName = '';
     if(!nameOk(checkerName)) checkerName = null;
@@ -517,11 +525,7 @@ app.post('/api/tasks', auth, upload.array('attachments', 10), (req, res) => {
   const makerName = String(maker) === 'Me' ? (me.name||'') : maker;
   const checkerName = String(checker||'') === 'Me' ? (me.name||'') : (checker||null);
   const now = new Date().toISOString();
-  // enforce displayed_fc == 'Yes' requires at least one image
-  if(String(displayed_fc||'').toLowerCase()==='yes'){
-    const hasImage = (req.files||[]).some(f => (f.mimetype||'').startsWith('image/'));
-    if(!hasImage) return res.status(400).json({ error: 'fc_image_required' });
-  }
+  // Do not enforce FC image on first creation (always allowed)
   const r = db.prepare(`INSERT INTO tasks (title, description, category_id, company_id, assignee, checker, assigned_by, due_date, valid_from, criticality, license_owner, relevant_fc, displayed_fc, repeat_json, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`)
     .run(title, description, category_id || null, company_id || null, makerName, checkerName, assignedByName, String(due_date||'NA'), valid_from||null, criticality||null, license_owner||null, String(relevant_fc||'No').toLowerCase()==='yes'?1:0, displayed_fc||null, repeat_json, now, now);
@@ -1155,7 +1159,7 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
   if(!isElevated) nextAssignee = existing.assignee; // maker cannot reassign
   const nextChecker = isElevated ? (body.checker || existing.checker) : existing.checker;
   // enforce displayed_fc == 'Yes' requires at least one image
-  if(!isElevated && String(body.displayed_fc|| existing.displayed_fc || '').toLowerCase()==='yes'){
+  if(!isElevated && String(body.displayed_fc|| existing.displayed_fc || '').toLowerCase()==='yes' && existing.id){
     const hasImageNew = (req.files||[]).some(f => (f.mimetype||'').startsWith('image/'));
     const hasImageExisting = db.prepare("SELECT COUNT(*) as c FROM attachments WHERE task_id = ? AND (file_type LIKE 'image/%')").get(id).c > 0;
     if(!(hasImageNew || hasImageExisting)) return res.status(400).json({ error: 'fc_image_required' });
@@ -1176,7 +1180,10 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
     displayed_fc: (body.displayed_fc !== undefined ? body.displayed_fc : existing.displayed_fc) || null,
     repeat_json: body.repeat_json || existing.repeat_json
   };
-  db.prepare(`UPDATE tasks SET title=?, description=?, category_id=?, company_id=?, assignee=?, assigned_by=?, checker=?, due_date=?, valid_from=?, criticality=?, license_owner=?, relevant_fc=?, displayed_fc=?, repeat_json=?, status=?, updated_at=? WHERE id=?`)
+  // Auto-submit on first maker update: if previously not submitted and a checker exists, set submitted_at and notify checker
+  let submittedAt = existing.submitted_at || null;
+  if(!submittedAt && next.checker){ submittedAt = now; }
+  db.prepare(`UPDATE tasks SET title=?, description=?, category_id=?, company_id=?, assignee=?, assigned_by=?, checker=?, due_date=?, valid_from=?, criticality=?, license_owner=?, relevant_fc=?, displayed_fc=?, repeat_json=?, status=?, submitted_at=?, edit_unlocked=0, updated_at=? WHERE id=?`)
     .run(next.title,
          next.description,
          next.category_id,
@@ -1192,6 +1199,7 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
          next.displayed_fc,
          next.repeat_json,
          'pending',
+         submittedAt,
          now,
          id);
   // if assignee changed, add an auto note and notify if already submitted
@@ -1255,7 +1263,9 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
       // Maker should always be notified on reassignment
       if(assigneeChanged){ await sendAssignmentNotification(full); }
       // Checker should be notified only if already submitted
-      if(checkerChanged && !!existing.submitted_at){ await sendSubmissionNotification(full); }
+      if((checkerChanged && !!existing.submitted_at) || (!existing.submitted_at && submittedAt && next.checker)){
+        await sendSubmissionNotification(full);
+      }
     }catch(_e){}
   })();
 });
@@ -1310,13 +1320,8 @@ app.post('/api/tasks/:id/submit', auth, (req, res) => {
   const isAdmin = String(me.role||'').toLowerCase() === 'admin';
   if(!(isMaker || isAdmin)) return res.status(403).json({ error: 'forbidden' });
   const now = new Date().toISOString();
-  // status to pending reviewed state (use pending to surface to checker via filter logic)
-  db.prepare('UPDATE tasks SET status=?, submitted_at=?, edit_unlocked=0, updated_at=? WHERE id=?').run('pending', now, now, id);
-  db.prepare('INSERT INTO notes (task_id, text, created_at) VALUES (?, ?, ?)')
-    .run(id, `Submitted to checker ${t.checker||''} by ${me.name||''}`, now);
-  res.json({ ok: true });
-  // fire-and-forget checker submission notification
-  try{ const full = getTaskWithJoins(id); sendSubmissionNotification(full); }catch(_e){}
+  // Deprecated route retained for compatibility; do nothing
+  return res.json({ ok: true, deprecated: true });
 });
 
 // Maker requests edit when locked; notify admins and checker

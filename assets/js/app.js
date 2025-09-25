@@ -284,7 +284,6 @@
     el('markCompleted').addEventListener('click', onMarkCompleted);
     el('markAborted').addEventListener('click', onMarkRejected);
     el('reopenPending').addEventListener('click', onReopen);
-    const submitBtn = document.getElementById('submitToChecker'); if(submitBtn) submitBtn.addEventListener('click', onSubmitToChecker);
     const delBtn = document.getElementById('deleteTask'); if(delBtn) delBtn.addEventListener('click', onDeleteTask);
 
     // notes
@@ -457,7 +456,8 @@
         const freqLabel = freq=== 'daily' ? 'Daily' : freq==='weekly' ? 'Weekly' : freq==='monthly' ? 'Monthly' : freq==='quarterly' ? 'Quarterly' : freq==='half_yearly' ? 'Half-yearly' : freq==='annually' ? 'Annually' : '';
         const crit = String(s.criticality||'');
         const critLabel = crit ? crit.charAt(0).toUpperCase()+crit.slice(1).toLowerCase() : '';
-        tr.innerHTML = `<td>${escapeHTML(s.title)}</td><td>${escapeHTML(s.category||'')}</td><td>${escapeHTML(freqLabel)}</td><td>${escapeHTML(critLabel)}</td><td>${s.relevant_fc? 'Yes':'No'}</td><td><button class="btn" data-id="${s.id}">Delete</button></td>`;
+        const disp = (s.displayed_fc==null || String(s.displayed_fc).toUpperCase()==='NA') ? 'NA' : String(s.displayed_fc);
+        tr.innerHTML = `<td>${escapeHTML(s.title)}</td><td>${escapeHTML(s.category||'')}</td><td>${escapeHTML(freqLabel)}</td><td>${escapeHTML(critLabel)}</td><td>${s.relevant_fc? 'Yes':'No'}</td><td>${escapeHTML(disp)}</td><td><button class="btn" data-id="${s.id}">Delete</button></td>`;
         list.appendChild(tr);
       });
       // append inline add row inside the same table
@@ -487,6 +487,13 @@
           <select id="stdRelevantFc" style="width:100%">
             <option value="No">No</option>
             <option value="Yes">Yes</option>
+          </select>
+        </td>
+        <td>
+          <select id="stdDisplayedFc" style="width:100%">
+            <option value="NA" selected>NA</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
           </select>
         </td>
         <td><button class="btn primary" id="stdAddBtn" type="button">Add</button></td>`;
@@ -525,7 +532,7 @@
         const makerSel = row.querySelector('[data-maker]');
         const checkerSel = row.querySelector('[data-checker]');
         if(makerSel){ fillOptions(makerSel, (api.meta.people||[])); makerSel.value = 'Me'; }
-        if(checkerSel){ fillOptions(checkerSel, (api.meta.people||[]).filter(p => p)); checkerSel.value = ''; }
+        if(checkerSel){ fillOptions(checkerSel, (api.meta.people||[]).filter(p => p)); checkerSel.value = 'Me'; }
       });
       const selectAll = document.getElementById('stdSelectAll');
       if(selectAll && !selectAll._bound){
@@ -544,11 +551,46 @@
         const repeat_json = el('stdRepeat').value;
         const criticality = (document.getElementById('stdCriticality')||{value:''}).value;
         const relevant_fc = (document.getElementById('stdRelevantFc')||{value:'No'}).value;
+        const displayed_fc = (document.getElementById('stdDisplayedFc')||{value:'NA'}).value;
         if(!title) return toast('Title required');
-        const resp = await fetch('/api/standards', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ title, category_id, repeat_json, criticality, relevant_fc }) });
+        const resp = await fetch('/api/standards', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ title, category_id, repeat_json, criticality, relevant_fc, displayed_fc }) });
         if(resp.ok){ el('stdTitle').value=''; loadStandards(); toast('Standard added'); } else { toast('Failed to add'); }
       });
       addBtn._bound = true;
+    }
+    // inline add-new for stdCategory
+    const stdCatSel = el('stdCategory');
+    if(stdCatSel && !stdCatSel._augmented){
+      const cats = (api.meta && api.meta.categories) ? api.meta.categories : [];
+      if(!Array.from(stdCatSel.options).some(o=> o.value==='__ADD__')){ const opt=document.createElement('option'); opt.value='__ADD__'; opt.textContent='+ Add new…'; stdCatSel.appendChild(opt); }
+      stdCatSel.addEventListener('change', async ()=>{
+        if(stdCatSel.value==='__ADD__'){
+          const name = prompt('New category name');
+          if(name && name.trim()){
+            const r = await fetch('/api/categories', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ name: name.trim() }) });
+            if(r.ok){ await api.loadMeta(); const cats2 = api.meta.categories||[]; stdCatSel.innerHTML=''; cats2.forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; stdCatSel.appendChild(o); }); const add=document.createElement('option'); add.value='__ADD__'; add.textContent='+ Add new…'; stdCatSel.appendChild(add); const created = cats2.find(c=> c.name===name.trim()); if(created){ stdCatSel.value=String(created.id); } toast('Category added'); }
+            else { toast('Failed to add category'); stdCatSel.value=''; }
+          } else { stdCatSel.value=''; }
+        }
+      });
+      stdCatSel._augmented = true;
+    }
+    // add-new for stdApplyCompany
+    const stdCompanySel = el('stdApplyCompany');
+    if(stdCompanySel && !stdCompanySel._augmented){
+      const ensureAdd = ()=>{ if(!Array.from(stdCompanySel.options).some(o=>o.value==='__ADD__')){ const opt=document.createElement('option'); opt.value='__ADD__'; opt.textContent='+ Add new…'; stdCompanySel.appendChild(opt); } };
+      ensureAdd();
+      stdCompanySel.addEventListener('change', async ()=>{
+        if(stdCompanySel.value==='__ADD__'){
+          const name = prompt('New location/site name');
+          if(name && name.trim()){
+            const r = await fetch('/api/companies', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ name: name.trim() }) });
+            if(r.ok){ await api.loadMeta(); const comps2 = api.meta.companies||[]; stdCompanySel.innerHTML=''; comps2.forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; stdCompanySel.appendChild(o); }); ensureAdd(); const created = comps2.find(c=> c.name===name.trim()); if(created){ stdCompanySel.value=String(created.id); } toast('Location/Site added'); }
+            else { toast('Failed to add location/site'); stdCompanySel.value=''; }
+          } else { stdCompanySel.value=''; }
+        }
+      });
+      stdCompanySel._augmented = true;
     }
     const af = el('stdApplyForm'); if(af && !af._bound){
       af.addEventListener('submit', async (e)=>{
@@ -760,8 +802,8 @@
           saveBtnEl.disabled = !canEditThis;
         }
       }
-      // Maker/Checker are admin-only; makers should not change them
-      const makerSel = el('fMaker'); if(makerSel) makerSel.disabled = !p.can_edit;
+      // Maker is editable for admins, locked for non-admin makers
+      const makerSel = el('fMaker'); if(makerSel) makerSel.disabled = !(p.can_edit);
       const checkerSel = el('fChecker'); if(checkerSel) checkerSel.disabled = !p.can_edit;
       // Ensure maker/checker selects have a valid value even if current user's name is not in the people list
       const ensureOption = (sel, value) => {
@@ -779,6 +821,11 @@
         const desiredChecker = (t.checker === currentUserName) ? 'Me' : (t.checker||'');
         ensureOption(checkerSel, desiredChecker);
         if(checkerSel && desiredChecker) checkerSel.value = desiredChecker;
+      }
+      // create mode: hide non-create actions
+      if(!isEdit){
+        const ids = ['markCompleted','markAborted','reopenPending','deleteTask'];
+        ids.forEach(id => { const b = document.getElementById(id); if(b) b.style.display='none'; });
       }
       // viewers can change status on their own compliances; enable buttons, server will enforce
       const markCompletedBtn = el('markCompleted');
@@ -856,27 +903,6 @@
       }
       // hide delete for viewers (admin only)
       const delBtn2 = document.getElementById('deleteTask'); if(delBtn2) delBtn2.style.display = p.can_edit ? 'inline-block' : 'none';
-      // Submit button visible if editing and a checker exists; enabled for maker or admin
-      const submitBtn2 = document.getElementById('submitToChecker');
-      if(submitBtn2){
-        const hasChecker = !!(t && t.checker);
-        // show only for admin or maker
-        const canSeeSubmit = (isEdit && hasChecker && (p.can_edit || isMaker));
-        submitBtn2.style.display = canSeeSubmit ? 'inline-block' : 'none';
-        // Do not hard-disable to allow showing a message on click; style as disabled when submitted
-        const isUnlocked = !!(t && (t.edit_unlocked || t.editUnlocked));
-        if(isSubmitted && !isUnlocked){
-          submitBtn2.setAttribute('data-submitted','1');
-          submitBtn2.title = 'Already submitted';
-          submitBtn2.style.opacity = '0.6';
-          submitBtn2.style.cursor = 'not-allowed';
-        }else{
-          submitBtn2.removeAttribute('data-submitted');
-          submitBtn2.title = '';
-          submitBtn2.style.opacity = '';
-          submitBtn2.style.cursor = '';
-        }
-      }
       // Lock maker from editing when submitted unless unlocked by checker/admin
       const isUnlocked = !!(t && (t.edit_unlocked || t.editUnlocked));
       if(isSubmitted && !isUnlocked && isMaker && !isAdmin){
@@ -1346,8 +1372,8 @@
     const fcNewFiles = (fcImageInput && fcImageInput.files) ? Array.from(fcImageInput.files) : [];
     const newGeneralCount = generalNewFiles.length;
     const newFcCount = fcNewFiles.length;
-    // If Displayed in FC is Yes, enforce at least one FC image (existing marked or newly provided)
-    if(String(displayedFc) === 'Yes' && !(existingHasFcImage || newFcCount > 0)){
+    // If Displayed in FC is Yes, enforce at least one FC image ONLY when editing an existing task
+    if(id && String(displayedFc) === 'Yes' && !(existingHasFcImage || newFcCount > 0)){
       return toast('FC Image is required');
     }
     // Require at least one general attachment (excluding FC image) ONLY when maker updates an existing task
@@ -1426,7 +1452,7 @@
       });
     }
 
-    const saveBtn = el('saveBtn'); if(saveBtn){ saveBtn.disabled = true; }
+    const saveBtn = el('saveBtn'); if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = id? 'Updating…' : 'Creating…'; }
     let createdId = null;
     if(sessionStorage.getItem('cf_token')){
       if(id){
@@ -1451,12 +1477,12 @@
       setTasks(tasks);
     }
     toast(id ? 'Updated' : 'Created');
-    if(id){ toast("Don't forget to Submit to checker for review."); }
+    // no submit button anymore
     const nextId = id || createdId;
     // Clear file inputs to avoid re-upload on repeated saves
     try{ if(fileInput) fileInput.value=''; if(fcImageInput) fcImageInput.value=''; }catch(_e){}
-    if(nextId){ openEditor(nextId); }
-    if(saveBtn){ saveBtn.disabled = false; }
+    if(nextId){ showList(); }
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = id? 'Update' : 'Create'; }
   }
 
   async function onDeleteTask(){
