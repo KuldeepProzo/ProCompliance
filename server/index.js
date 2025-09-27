@@ -1551,9 +1551,9 @@ async function sendReopenForEditsNotification(task, actorName){
   if(!to) return false;
   const name = (maker && maker.name) || task.assignee || '';
   const salutation = `Hi ${name},`;
-  const intro = `${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.`;
+  const intro = `${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes.`;
   const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n  </div>`;
-  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to edit this compliance.`;
+  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to edit this compliance.`;
   const subject = `[Reopened for Edits] ${task.title}`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
