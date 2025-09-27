@@ -299,8 +299,8 @@ app.post('/api/standards/apply', auth, requireAdmin, async (req, res) => {
   const { company_id, items } = req.body || {};
   const me = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.sub) || {};
   if(!company_id || !Array.isArray(items) || items.length===0) return res.status(400).json({ error: 'missing_fields' });
-  const ins = db.prepare(`INSERT INTO tasks (title, description, category_id, company_id, assignee, checker, assigned_by, due_date, criticality, relevant_fc, repeat_json, status, created_at, updated_at)
-                          VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`);
+  const ins = db.prepare(`INSERT INTO tasks (title, description, category_id, company_id, assignee, checker, assigned_by, due_date, criticality, relevant_fc, displayed_fc, repeat_json, status, created_at, updated_at)
+                          VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`);
   const now = new Date().toISOString();
   let created = 0;
   const createdByMaker = new Map(); // makerName -> [taskId]
@@ -309,15 +309,16 @@ app.post('/api/standards/apply', auth, requireAdmin, async (req, res) => {
     if(!std) continue;
     const due = it.due_date || 'NA';
     // validate maker/checker names against users
-    let makerName = String(it.maker||'Me')==='Me'? me.name: (it.maker||'');
-    let checkerName = String(it.checker||'')==='Me' ? (me.name||'') : String(it.checker||'');
-    const nameOk = (n)=>{ if(!n) return false; const row = db.prepare('SELECT 1 as x FROM users WHERE name = ?').get(String(n)); return !!row; };
-    if(!nameOk(makerName)) makerName = '';
-    if(!nameOk(checkerName)) checkerName = null;
+    const makerRaw = String(it.maker||'').trim();
+    const checkerRaw = String(it.checker||'').trim();
+    const fallback = (me.name||'');
+    const nameOk = (s)=>{ const n=String(s||'').trim(); if(!n) return false; const row = db.prepare('SELECT 1 as x FROM users WHERE name = ?').get(n); return !!row; };
+    let makerName = (makerRaw.toLowerCase()==='me' || makerRaw==='') ? fallback : (nameOk(makerRaw)? makerRaw : fallback);
+    let checkerName = (checkerRaw.toLowerCase()==='me') ? fallback : (checkerRaw ? (nameOk(checkerRaw)? checkerRaw : fallback) : fallback);
     const relFc = (typeof std.relevant_fc === 'string')
       ? (String(std.relevant_fc).toLowerCase()==='yes' ? 1 : 0)
       : (std.relevant_fc ? 1 : 0);
-    const r = ins.run(std.title, std.category_id||null, Number(company_id), makerName, checkerName, me.name||'', due, std.criticality||null, relFc, std.repeat_json||'{"frequency":null}', now, now);
+    const r = ins.run(std.title, std.category_id||null, Number(company_id), makerName, checkerName, me.name||'', due, std.criticality||null, relFc, (std.displayed_fc||'NA'), std.repeat_json||'{"frequency":null}', now, now);
     const taskId = r.lastInsertRowid;
     if(makerName){ const arr = createdByMaker.get(makerName) || []; arr.push(taskId); createdByMaker.set(makerName, arr); }
     created++;
@@ -521,9 +522,16 @@ app.post('/api/tasks', auth, upload.array('attachments', 10), (req, res) => {
     if(!allowed.includes(Number(category_id))) return res.status(403).json({ error: 'forbidden_category' });
   }
   if(!title || !maker || !assigned_by) return res.status(400).json({ error: 'missing_fields' });
-  const assignedByName = String(assigned_by) === 'Me' ? (me.name||'') : assigned_by;
-  const makerName = String(maker) === 'Me' ? (me.name||'') : maker;
-  const checkerName = String(checker||'') === 'Me' ? (me.name||'') : (checker||null);
+  const normalizePerson = (val, fallbackMe) => {
+    const raw = String(val||'').trim();
+    if(!raw || raw.toLowerCase()==='me') return fallbackMe;
+    // If not an exact user name, fallback to Me
+    const row = db.prepare('SELECT 1 as x FROM users WHERE name = ?').get(raw);
+    return row ? raw : fallbackMe;
+  };
+  const assignedByName = normalizePerson(assigned_by, (me.name||''));
+  const makerName = normalizePerson(maker, (me.name||''));
+  const checkerName = normalizePerson(checker, (me.name||''));
   const now = new Date().toISOString();
   // Do not enforce FC image on first creation (always allowed)
   const r = db.prepare(`INSERT INTO tasks (title, description, category_id, company_id, assignee, checker, assigned_by, due_date, valid_from, criticality, license_owner, relevant_fc, displayed_fc, repeat_json, status, created_at, updated_at)
@@ -976,7 +984,11 @@ function createViewerUserByEmail(email){
 function htmlEscape(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function buildTasksTable(tasks){
   const rows = tasks.map(t=>{
-    const statusLabel = (String(t.status)==='completed') ? 'Renewal Needed' : 'Pending';
+    let statusLabel = 'Pending';
+    if(String(t.status)==='completed'){
+      // If due date is NA, keep Completed label (no renewal needed)
+      statusLabel = (String(t.due_date||'').toUpperCase()==='NA') ? 'Completed' : 'Renewal Needed';
+    }
     return `<tr>
       <td>${htmlEscape(t.title)}</td>
       <td>${htmlEscape(t.company||'')}</td>
@@ -1010,7 +1022,7 @@ async function sendGroupedEmail(to, recipientName, tasks, audience){
     : (audience==='admin'
       ? 'Below are the compliances that need attention across the organization.'
       : 'Below are the compliances which need your attention.');
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/tasks')} to view these compliances.</p>\n    ${buildTasksTable(tasks)}\n  </div>`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/tasks\">ProCompliance</a> to view these compliances.</p>\n    ${buildTasksTable(tasks)}\n  </div>`;
   const subject = (audience==='assignment')
     ? `[Assigned] ${tasks.length} new compliances`
     : (audience==='admin'
@@ -1164,6 +1176,11 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
     const hasImageExisting = db.prepare("SELECT COUNT(*) as c FROM attachments WHERE task_id = ? AND (file_type LIKE 'image/%')").get(id).c > 0;
     if(!(hasImageNew || hasImageExisting)) return res.status(400).json({ error: 'fc_image_required' });
   }
+  // Require Valid From for makers (non-admin) when updating
+  if(!isElevated){
+    const vfIncoming = (req.body && req.body.valid_from) || existing.valid_from;
+    if(!vfIncoming){ return res.status(400).json({ error: 'valid_from_required' }); }
+  }
   const next = {
     title: body.title || existing.title,
     description: (body.description !== undefined ? body.description : existing.description) || '',
@@ -1216,9 +1233,9 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
     db.prepare('INSERT INTO attachments (task_id, file_name, file_size, file_type, stored_name, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(id, f.originalname, f.size, f.mimetype, f.filename, now);
   }
-  // Log detailed change note for maker edits; generic note for admin
+  // Log detailed change note for maker edits; and for admin when reopened for edits
   try{
-    const isMakerEdit = (!isAdmin && isMaker);
+    const isMakerEdit = (!isElevated && isMaker);
     if(isMakerEdit){
       const trunc = (s) => {
         const str = String(s==null? '': s);
@@ -1249,8 +1266,26 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
           .run(id, `Edited by ${me.name||''} (maker). No field changes detected.`, now);
       }
     } else {
-      db.prepare('INSERT INTO notes (task_id, text, created_at) VALUES (?, ?, ?)')
-        .run(id, `Updated by ${me.name||''}`, now);
+      // For admins: log diffs as well, but only if reopened (or always, to be thorough)
+      const trunc = (s) => { const str = String(s==null? '': s); return str.length>120 ? str.slice(0,117)+'…' : str; };
+      const oldCat = existing.category_id ? (db.prepare('SELECT name FROM categories WHERE id = ?').get(existing.category_id)||{}).name : '';
+      const newCat = next.category_id ? (db.prepare('SELECT name FROM categories WHERE id = ?').get(next.category_id)||{}).name : '';
+      const oldCom = existing.company_id ? (db.prepare('SELECT name FROM companies WHERE id = ?').get(existing.company_id)||{}).name : '';
+      const newCom = next.company_id ? (db.prepare('SELECT name FROM companies WHERE id = ?').get(next.company_id)||{}).name : '';
+      const changes = [];
+      if(String(existing.title||'') !== String(next.title||'')) changes.push(`Title: '${trunc(existing.title||'')}' → '${trunc(next.title||'')}'`);
+      if(String(existing.description||'') !== String(next.description||'')) changes.push(`Description: '${trunc(existing.description||'')}' → '${trunc(next.description||'')}'`);
+      if((existing.category_id||null) !== (next.category_id||null)) changes.push(`Category: '${trunc(oldCat||'')}' → '${trunc(newCat||'')}'`);
+      if((existing.company_id||null) !== (next.company_id||null)) changes.push(`Location / Site: '${trunc(oldCom||'')}' → '${trunc(newCom||'')}'`);
+      if(String(existing.due_date||'') !== String(next.due_date||'')) changes.push(`Valid Till: '${trunc(existing.due_date||'')}' → '${trunc(next.due_date||'')}'`);
+      if(String(existing.valid_from||'') !== String(next.valid_from||'')) changes.push(`Valid From: '${trunc(existing.valid_from||'')}' → '${trunc(next.valid_from||'')}'`);
+      if(String(existing.criticality||'') !== String(next.criticality||'')) changes.push(`Criticality: '${trunc(existing.criticality||'')}' → '${trunc(next.criticality||'')}'`);
+      if(String(existing.license_owner||'') !== String(next.license_owner||'')) changes.push(`Licence Owner: '${trunc(existing.license_owner||'')}' → '${trunc(next.license_owner||'')}'`);
+      if(Number(existing.relevant_fc||0) !== Number(next.relevant_fc||0)) changes.push(`Relevant FC: '${(existing.relevant_fc? 'Yes':'No')}' → '${(next.relevant_fc? 'Yes':'No')}'`);
+      if(String(existing.displayed_fc||'') !== String(next.displayed_fc||'')) changes.push(`Displayed FC: '${trunc(existing.displayed_fc||'')}' → '${trunc(next.displayed_fc||'')}'`);
+      if(String(existing.repeat_json||'') !== String(next.repeat_json||'')) changes.push(`Repeat: '${trunc(existing.repeat_json||'')}' → '${trunc(next.repeat_json||'')}'`);
+      const noteText = changes.length>0 ? (`Edited by ${me.name||''} (admin). Changes:\n- ` + changes.join('\n- ')) : (`Updated by ${me.name||''}`);
+      db.prepare('INSERT INTO notes (task_id, text, created_at) VALUES (?, ?, ?)').run(id, noteText, now);
     }
   }catch(_e){
     // best-effort logging; ignore errors
@@ -1276,7 +1311,8 @@ app.post('/api/tasks/:id/status', auth, (req, res) => {
   if(!['pending','completed','rejected'].includes(status)) return res.status(400).json({ error: 'invalid_status' });
   const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
   const me = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.user.sub) || {};
-  const isAdmin = String(me.role||'').toLowerCase() === 'admin';
+  const roleStr = String(me.role||'').toLowerCase();
+  const isAdmin = (roleStr === 'admin' || roleStr === 'superadmin');
   const isAssignee = (existing && existing.assignee === (me.name||''));
   const isChecker = (existing && existing.checker === (me.name||''));
   // allow admin; allow assignee always; allow checker if maker has submitted (submitted_at set)
@@ -1361,10 +1397,12 @@ app.get('/api/tasks/:id/notes', auth, requireAdmin, (req, res) => {
 });
 app.post('/api/tasks/:id/notes', auth, upload.single('file'), (req, res) => {
   const id = Number(req.params.id);
-  const text = (req.body && req.body.text || '').trim();
+  let text = (req.body && req.body.text || '').trim();
   if(!text) return res.status(400).json({ error: 'note_required' });
   const now = new Date().toISOString();
   const f = req.file;
+  const me = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.sub) || { name: '' };
+  if(me && me.name){ text = `${me.name}: ${text}`; }
   db.prepare('INSERT INTO notes (task_id, text, file_name, file_size, file_type, stored_name, created_at) VALUES (?,?,?,?,?,?,?)')
     .run(id, text, f? f.originalname : null, f? f.size : null, f? f.mimetype : null, f? f.filename : null, now);
   res.status(201).json({ ok: true });
@@ -1380,6 +1418,16 @@ app.get('/api/notes/:id/download', auth, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${n.file_name}"`);
   fs.createReadStream(p).pipe(res);
 });
+// View note attachment inline
+app.get('/api/notes/:id/view', auth, (req, res) => {
+  const n = db.prepare('SELECT * FROM notes WHERE id = ?').get(Number(req.params.id));
+  if(!n || !n.stored_name) return res.status(404).json({ error: 'not_found' });
+  const p = path.join(UPLOAD_DIR, n.stored_name);
+  if(!fs.existsSync(p)) return res.status(410).json({ error: 'gone' });
+  res.setHeader('Content-Type', n.file_type || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${n.file_name}"`);
+  fs.createReadStream(p).pipe(res);
+});
 
 // Download attachment
 app.get('/api/attachments/:id/download', auth, (req, res) => {
@@ -1391,6 +1439,51 @@ app.get('/api/attachments/:id/download', auth, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${a.file_name}"`);
   fs.createReadStream(p).pipe(res);
 });
+// View attachment inline
+app.get('/api/attachments/:id/view', auth, (req, res) => {
+  const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(Number(req.params.id));
+  if(!a) return res.status(404).json({ error: 'not_found' });
+  const p = path.join(UPLOAD_DIR, a.stored_name);
+  if(!fs.existsSync(p)) return res.status(410).json({ error: 'gone' });
+  res.setHeader('Content-Type', a.file_type || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${a.file_name}"`);
+  fs.createReadStream(p).pipe(res);
+});
+
+// HTML preview pages with Download button
+app.get('/attachments/:id', auth, (req, res) => {
+  const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(Number(req.params.id));
+  if(!a) return res.status(404).send('Not found');
+  const hdr = req.headers.authorization || '';
+  const token = (req.query && req.query.token) ? String(req.query.token) : (hdr.startsWith('Bearer ') ? hdr.slice(7) : '');
+  const viewUrl = `/api/attachments/${a.id}/view${token? `?token=${encodeURIComponent(token)}`: ''}`;
+  const dlUrl = `/api/attachments/${a.id}/download${token? `?token=${encodeURIComponent(token)}`: ''}`;
+  const isImage = (String(a.file_type||'').toLowerCase().startsWith('image/'));
+  const isPdf = (String(a.file_type||'').toLowerCase()==='application/pdf');
+  const headerHtml = isPdf ? '' : `<div style="padding:8px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff"><a href="${dlUrl}" download class="btn">Download</a></div>`;
+  const bodyHtml = isImage
+    ? `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:calc(100vh - 42px);background:#111827"><img src="${viewUrl}" alt="preview" style="max-width:100%;max-height:100%;object-fit:contain;background:#fff"></div>`
+    : `<iframe src="${viewUrl}" style="border:0;width:100%;height:calc(100vh - ${isPdf? '0':'42'}px)"></iframe>`;
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>${htmlEscape(a.file_name||'Attachment')}</title></head><body style="margin:0;font-family:Arial,Helvetica,sans-serif">${headerHtml}${bodyHtml}</body></html>`);
+});
+
+app.get('/notes/:id', auth, (req, res) => {
+  const n = db.prepare('SELECT * FROM notes WHERE id = ?').get(Number(req.params.id));
+  if(!n || !n.stored_name) return res.status(404).send('Not found');
+  const hdr = req.headers.authorization || '';
+  const token = (req.query && req.query.token) ? String(req.query.token) : (hdr.startsWith('Bearer ') ? hdr.slice(7) : '');
+  const viewUrl = `/api/notes/${n.id}/view${token? `?token=${encodeURIComponent(token)}`: ''}`;
+  const dlUrl = `/api/notes/${n.id}/download${token? `?token=${encodeURIComponent(token)}`: ''}`;
+  const isImage = (String(n.file_type||'').toLowerCase().startsWith('image/'));
+  const isPdf = (String(n.file_type||'').toLowerCase()==='application/pdf');
+  const headerHtml = isPdf ? '' : `<div style=\"padding:8px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff\"><a href=\"${dlUrl}\" download class=\"btn\">Download</a></div>`;
+  const bodyHtml = isImage
+    ? `<div style=\"display:flex;align-items:center;justify-content:center;width:100%;height:calc(100vh - 42px);background:#111827\"><img src=\"${viewUrl}\" alt=\"preview\" style=\"max-width:100%;max-height:100%;object-fit:contain;background:#fff\"></div>`
+    : `<iframe src=\"${viewUrl}\" style=\"border:0;width:100%;height:calc(100vh - ${isPdf? '0':'42'}px)\"></iframe>`;
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.end(`<!doctype html><html><head><meta charset=\"utf-8\"><title>${htmlEscape(n.file_name||'Attachment')}</title></head><body style=\"margin:0;font-family:Arial,Helvetica,sans-serif\">${headerHtml}${bodyHtml}</body></html>`);
+});
 
   // Delete attachment (admin always; maker allowed when not locked OR reopened for edits)
 app.delete('/api/attachments/:id', auth, (req, res) => {
@@ -1400,7 +1493,8 @@ app.delete('/api/attachments/:id', auth, (req, res) => {
   const t = db.prepare('SELECT * FROM tasks WHERE id = ?').get(a.task_id);
   if(!t) return res.status(404).json({ error: 'not_found' });
   const me = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.user.sub) || {};
-  const isAdmin = String(me.role||'').toLowerCase() === 'admin';
+  const roleStr = String(me.role||'').toLowerCase();
+  const isAdmin = (roleStr==='admin' || roleStr==='superadmin');
   const isMaker = t.assignee === (me.name||'');
   if(!(isAdmin || isMaker)) return res.status(403).json({ error: 'forbidden' });
   // If submitted and not reopened, maker cannot delete attachments
@@ -1439,7 +1533,7 @@ async function sendAssignmentNotification(task){
   if(!to) return false;
   const salutation = `Hi ${name},`;
   const intro = 'You have been assigned a new compliance. Please review the details below.';
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/edit/' + task.id)} to view this compliance.</p>\n  </div>`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n  </div>`;
   const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to view this compliance.`;
   const subject = `[Assigned] ${task.title}`;
   try{
@@ -1458,7 +1552,7 @@ async function sendReopenForEditsNotification(task, actorName){
   const name = (maker && maker.name) || task.assignee || '';
   const salutation = `Hi ${name},`;
   const intro = `${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.`;
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/edit/' + task.id)} to edit this compliance.</p>\n  </div>`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n  </div>`;
   const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes and resubmit to the checker.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to edit this compliance.`;
   const subject = `[Reopened for Edits] ${task.title}`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
@@ -1470,7 +1564,7 @@ async function sendSubmissionNotification(task){
   if(!to) return false;
   const salutation = `Hi ${name},`;
   const intro = 'A compliance has been submitted for your review.';
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">Visit ${htmlEscape(APP_URL + '/#/edit/' + task.id)} to review this compliance.</p>\n  </div>`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n  </div>`;
   const subject = `[Action Required] ${task.title} submitted for review`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
@@ -1488,7 +1582,7 @@ async function sendEditRequestNotification(task, requesterName){
   if(!to && cc){ to = cc; }
   if(!to) return false;
   const subject = `[Edit Request] ${task.title}`;
-  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape('Hi,')}</p>\n    <p>${htmlEscape(requesterName||'Maker')} has requested to edit the following compliance:</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can reopen it as pending to allow edits.</p>\n  </div>`;
+  const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape('Hi,')}</p>\n    <p>${htmlEscape(requesterName||'Maker')} has requested to edit the following compliance:</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n    <p style=\"margin-top:16px;\">You can reopen it as pending to allow edits.</p>\n  </div>`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, cc: cc && to? cc: undefined, subject, html }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }
 

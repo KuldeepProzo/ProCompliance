@@ -56,8 +56,6 @@
       if(f.to){ url.searchParams.set('to', f.to); }
       if(f.status){ url.searchParams.set('status', f.status); }
       if(role) url.searchParams.set('role', role);
-      url.searchParams.set('sort', state.sort.key === 'dueDate' ? 'due_date' : state.sort.key);
-      url.searchParams.set('dir', state.sort.dir);
       const r = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } });
       if(!r.ok) return { list: [] };
       return await r.json();
@@ -66,7 +64,13 @@
     setToken(tok){ this.token = tok; sessionStorage.setItem('cf_token', tok); try{ localStorage.setItem('cf_token', tok); }catch(_e){} },
     async get(id){ const r = await fetch(`/api/tasks/${id}`, { headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok? r.json(): null; },
     async create(formData){ const r = await fetch('/api/tasks', { method:'POST', headers:{ Authorization:`Bearer ${this.token}` }, body: formData }); return r.ok? r.json(): null; },
-    async update(id, formData){ const r = await fetch(`/api/tasks/${id}`, { method:'PUT', headers:{ Authorization:`Bearer ${this.token}` }, body: formData }); return r.ok; },
+    async update(id, formData){
+      const r = await fetch(`/api/tasks/${id}`, { method:'PUT', headers:{ Authorization:`Bearer ${this.token}` }, body: formData });
+      if(r.ok) return { ok: true };
+      let code = '';
+      try{ const j = await r.json(); code = j && j.error; }catch(_e){}
+      return { ok: false, error: code };
+    },
     async setStatus(id, status){ const r = await fetch(`/api/tasks/${id}/status`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${this.token}` }, body: JSON.stringify({ status }) }); return r.ok; },
     async notes(id){ const r = await fetch(`/api/tasks/${id}/notes`, { headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok? r.json(): {notes: []}; },
     async addNote(id, fd){ const r = await fetch(`/api/tasks/${id}/notes`, { method:'POST', headers:{ Authorization:`Bearer ${this.token}` }, body: fd }); return r.ok; },
@@ -99,6 +103,7 @@
         lb.style.display='none'; lob.style.display='inline-block';
         
         state.isAdmin = (me.user && (me.user.role==='superadmin' || me.user.role==='admin'));
+        state.cachedMeName = (me.user && me.user.name) || '';
         const isSuperAdmin = (me.user && me.user.role==='superadmin');
         const stdLink = document.querySelector('.menu a[href="#/standards"]'); if(stdLink) stdLink.parentElement.style.display = state.isAdmin? '' : 'none';
         const setLink = document.querySelector('.menu a[href="#/settings"]'); if(setLink) setLink.parentElement.style.display = state.isAdmin? '' : 'none';
@@ -155,7 +160,8 @@
     ['Categories','Companies','Users','ReminderPolicies'].forEach(name => el('tab'+name).addEventListener('click', ()=> setTab(name)));
 
     // column sort
-    qsa('.th-sort').forEach(btn => btn.addEventListener('click', () => onSort(btn.dataset.sort)));
+    // disable user-driven sorting; enforce server/client default order
+    qsa('.th-sort').forEach(btn => btn.replaceWith(btn.cloneNode(true)));
 
     // add/edit form
     el('addTaskBtn').addEventListener('click', () => { if(!state.isAdmin){ toast('Admin only'); return; } openEditor(); });
@@ -660,6 +666,7 @@
               const lb = document.getElementById('loginBtn'); const lob = document.getElementById('logoutBtn');
               if(lb) lb.style.display='none'; if(lob) lob.style.display='inline-block';
               state.isAdmin = (me.user && (me.user.role==='superadmin' || me.user.role==='admin'));
+              state.cachedMeName = (me.user && me.user.name) || '';
               const stdLink = document.querySelector('.menu a[href="#/standards"]'); if(stdLink) stdLink.parentElement.style.display = state.isAdmin? '' : 'none';
               const setLink = document.querySelector('.menu a[href="#/settings"]'); if(setLink) setLink.parentElement.style.display = state.isAdmin? '' : 'none';
               const expLink = document.querySelector('.menu a[href="#/export"]'); if(expLink) expLink.parentElement.style.display = state.isAdmin? '' : 'none';
@@ -802,9 +809,13 @@
           saveBtnEl.disabled = !canEditThis;
         }
       }
-      // Maker is editable for admins, locked for non-admin makers
+      // Maker/Checker locked for non-admins
       const makerSel = el('fMaker'); if(makerSel) makerSel.disabled = !(p.can_edit);
       const checkerSel = el('fChecker'); if(checkerSel) checkerSel.disabled = !p.can_edit;
+      // Additionally lock other fields for non-admin makers
+      if(isEdit && isMaker && !isAdmin){
+        ['fTitle','fCategory','fCompany','fCriticality','fRepeat','fRelevantFc','fDisplayedFc'].forEach(fid => { const fe = el(fid); if(fe) fe.disabled = true; });
+      }
       // Ensure maker/checker selects have a valid value even if current user's name is not in the people list
       const ensureOption = (sel, value) => {
         if(!sel) return;
@@ -1010,25 +1021,15 @@
   }
 
   function sortItems(items){
-    // Primary sort by criticality: High > Medium > Low > others
-    const critRank = v => {
-      const s = String(v||'').toLowerCase();
-      if(s==='high') return 0;
-      if(s==='medium') return 1;
-      if(s==='low') return 2;
-      return 3;
-    };
-    const a1 = [...items].sort((a,b) => {
-      const ra = critRank(a.criticality);
-      const rb = critRank(b.criticality);
-      if(ra !== rb) return ra - rb;
-      // tie-breakers: due date asc, then title asc
-      const da = (a.dueDate||a.due_date||'');
-      const db = (b.dueDate||b.due_date||'');
-      if(da !== db) return String(da).localeCompare(String(db));
+    const statusRank = s => String(s||'').toLowerCase()==='pending' ? 0 : 1;
+    const critRank = v => { const s=String(v||'').toLowerCase(); if(s==='high') return 0; if(s==='medium') return 1; if(s==='low') return 2; return 3; };
+    const dueRank = d => { const s=String(d||'').toUpperCase(); if(!s || s==='NA') return '9999-12-31'; return s; };
+    return [...items].sort((a,b)=>{
+      const sa = statusRank(a.status), sb = statusRank(b.status); if(sa!==sb) return sa-sb;
+      const ca = critRank(a.criticality), cb = critRank(b.criticality); if(ca!==cb) return ca-cb;
+      const da = dueRank(a.dueDate||a.due_date), db = dueRank(b.dueDate||b.due_date); if(da!==db) return String(da).localeCompare(String(db));
       return String(a.title||'').localeCompare(String(b.title||''));
     });
-    return a1;
   }
 
   async function render(){
@@ -1041,7 +1042,8 @@
     if(sessionStorage.getItem('cf_token')){
       const a = await api.list('to-me');
       const b = await api.list('by-me');
-      listA = a.list || []; listB = b.list || [];
+      listA = sortItems(applyFilters(a.list || []));
+      listB = sortItems(applyFilters(b.list || []));
     }else{
       ensureSeedData();
       const tasks = getTasks();
@@ -1075,8 +1077,11 @@
       tr.appendChild(tdText(crit ? crit.charAt(0).toUpperCase()+crit.slice(1).toLowerCase() : ''));
       const due = t.dueDate || t.due_date;
       tr.appendChild(tdText(formatRelativeDue(due)));
-      tr.appendChild(tdText(t.assignee || ''));
-      tr.appendChild(tdText(t.checker || ''));
+      const meName = (sessionStorage.getItem('cf_token') && state && state.cachedMeName) ? state.cachedMeName : null;
+      const makerLabel = meName && t.assignee===meName ? 'Me' : (t.assignee||'');
+      const checkerLabel = meName && t.checker===meName ? 'Me' : (t.checker||'');
+      tr.appendChild(tdText(makerLabel));
+      tr.appendChild(tdText(checkerLabel));
       tr.appendChild(tdText(cap((t.status||'').replace('aborted','rejected'))));
       tbody.appendChild(tr);
     });
@@ -1352,6 +1357,7 @@
 
     // Validate FC Image requirement and conditional minimum attachments
     const meInfo = sessionStorage.getItem('cf_token') ? (await api.me().catch(()=>null)) : null;
+    const isSuperAdminMe = !!(meInfo && meInfo.user && meInfo.user.role === 'superadmin');
     const currentUserName = (meInfo && meInfo.user && meInfo.user.name) || '';
     let existingAtts = [];
     let existingHasFcImage = false;
@@ -1372,13 +1378,13 @@
     const fcNewFiles = (fcImageInput && fcImageInput.files) ? Array.from(fcImageInput.files) : [];
     const newGeneralCount = generalNewFiles.length;
     const newFcCount = fcNewFiles.length;
-    // If Displayed in FC is Yes, enforce at least one FC image ONLY when editing an existing task
-    if(id && String(displayedFc) === 'Yes' && !(existingHasFcImage || newFcCount > 0)){
+    // If Displayed in FC is Yes, enforce at least one FC image ONLY when editing an existing task (skip for SuperAdmin)
+    if(id && !isSuperAdminMe && String(displayedFc) === 'Yes' && !(existingHasFcImage || newFcCount > 0)){
       return toast('FC Image is required');
     }
     // Require at least one general attachment (excluding FC image) ONLY when maker updates an existing task
     const isMakerEdit = !!(id && currentUserName && makerName && makerName === currentUserName);
-    if(isMakerEdit && (existingGeneralCount + newGeneralCount) < 1){
+    if(isMakerEdit && !isSuperAdminMe && (existingGeneralCount + newGeneralCount) < 1){
       return toast('Attachment required');
     }
 
@@ -1422,9 +1428,12 @@
     fd.append('description', description);
     fd.append('category_id', categoryId && categoryId!=='__ADD__' ? categoryId : '');
     fd.append('company_id', companyId && companyId!=='__ADD__' ? companyId : '');
-    fd.append('assignee', assignee);
-    fd.append('checker', checker);
-    fd.append('assigned_by', 'Me');
+    // Normalize Me -> current user for server
+    const normalizedMaker = (assignee==='Me') ? currentUserName : assignee;
+    const normalizedChecker = (checker==='Me') ? currentUserName : checker;
+    fd.append('assignee', normalizedMaker);
+    fd.append('checker', normalizedChecker);
+    fd.append('assigned_by', currentUserName || '');
     fd.append('due_date', dueDate||'');
     fd.append('valid_from', validFrom||'');
     fd.append('criticality', criticality||'');
@@ -1456,8 +1465,13 @@
     let createdId = null;
     if(sessionStorage.getItem('cf_token')){
       if(id){
-        const ok = await api.update(id, fd);
-        if(!ok) { toast('Update failed or not permitted'); if(saveBtn){ saveBtn.disabled=false; } return; }
+        const res = await api.update(id, fd);
+        if(!(res && res.ok)){
+          if(res && res.error === 'valid_from_required'){ toast('Valid From is required'); }
+          else { toast('Update failed or not permitted'); }
+          if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent = 'Update'; }
+          return;
+        }
       } else {
         const created = await api.create(fd);
         if(!created || !created.id){ toast('Create failed or not permitted'); if(saveBtn){ saveBtn.disabled=false; } return; }
@@ -1556,7 +1570,6 @@
     clearFilePreview();
     const files = Array.from(e.target.files||[]);
     files.forEach(file => {
-      if(file.size > MAX_FILE_SIZE) return addFileChip({name:file.name, size:file.size, type:file.type, error:'Too large'});
       const reader = new FileReader();
       reader.onload = ev => addFileChip({name:file.name, size:file.size, type:file.type, dataUrl:ev.target.result});
       reader.readAsDataURL(file);
@@ -1571,8 +1584,8 @@
     (list||[]).forEach(a => {
       const chip = document.createElement('span'); chip.className='file-chip';
       const link = document.createElement('a');
-      const url = `/api/attachments/${a.id}/download${token? `?token=${encodeURIComponent(token)}`: ''}`;
-      link.href = url;
+      const viewUrl = `/attachments/${a.id}${token? `?token=${encodeURIComponent(token)}`: ''}`;
+      link.href = viewUrl;
       link.textContent = `${a.file_name} ${a.file_size? '('+pretty(a.file_size)+')':''}`;
       link.target = '_blank';
       chip.appendChild(link);
@@ -1643,7 +1656,7 @@
           const meta = document.createElement('div'); meta.className='meta'; meta.textContent = new Date(n.created_at).toLocaleString();
           const body = document.createElement('div'); body.innerHTML = escapeHTML(n.text).replace(/\n/g,'<br>');
           d.appendChild(meta); d.appendChild(body);
-          if(n.file_name){ const a = document.createElement('div'); a.className='meta'; const link = document.createElement('a'); link.href = `/api/notes/${n.id}/download${token? `?token=${encodeURIComponent(token)}`: ''}`; link.textContent = `Attachment: ${n.file_name} ${n.file_size? '('+pretty(n.file_size)+')':''}`; link.target='_blank'; a.appendChild(link); d.appendChild(a); }          wrap.appendChild(d);
+          if(n.file_name){ const a = document.createElement('div'); a.className='meta'; const link = document.createElement('a'); link.href = `/notes/${n.id}${token? `?token=${encodeURIComponent(token)}`: ''}`; link.textContent = `Attachment: ${n.file_name} ${n.file_size? '('+pretty(n.file_size)+')':''}`; link.target='_blank'; a.appendChild(link); d.appendChild(a); }          wrap.appendChild(d);
         });
       });
       return;
@@ -1705,7 +1718,7 @@
 
   function toast(msg){
     const t = el('toast'); t.textContent = msg; t.hidden=false; clearTimeout(t._to);
-    t._to = setTimeout(()=>{ t.hidden=true; }, 1800);
+    t._to = setTimeout(()=>{ t.hidden=true; }, 3500);
     return false;
   }
 
