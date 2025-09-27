@@ -148,8 +148,9 @@ input[type="date"]:focus::-webkit-calendar-picker-indicator{
 .content > .card:first-of-type .tabs{flex:0 0 auto}
 .content > .card:first-of-type .tab-panels{flex:1 1 auto; overflow:hidden}
 
-/* Make the editor card horizontally scrollable when fields overflow */
-#editor{overflow-x:visible}
+/* Make the editor card use internal vertical scroll with sticky header */
+#editor:not([hidden]){height:calc(100vh - 90px); overflow-y:auto; overflow-x:visible; margin-bottom:0}
+#editor .card-header{position:sticky; top:0; background:var(--panel); z-index:2}
 #editor .grid{min-width:0; grid-template-columns:repeat(3, 1fr)}
 #editor form{padding:0 16px 16px}
 

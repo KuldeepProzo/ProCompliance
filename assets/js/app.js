@@ -710,6 +710,10 @@
     listCard.hidden = false;
     // do not force the hash here; router controls it
     await render();
+    // Robustly reset scroll/selection to prevent jump under header when switching from editor
+    try{ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(_e){}
+    // Ensure scroll to top after layout paint
+    requestAnimationFrame(() => { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); });
   }
 
   async function openEditor(id){
