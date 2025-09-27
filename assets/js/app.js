@@ -1376,6 +1376,22 @@
     const fcImageInput = el('fFcImage');
     const generalNewFiles = (fileInput && fileInput.files) ? Array.from(fileInput.files) : [];
     const fcNewFiles = (fcImageInput && fcImageInput.files) ? Array.from(fcImageInput.files) : [];
+    // Allow only images, pdf, doc/docx, xls/xlsx, csv
+    const allowedTypes = [
+      'image/jpeg','image/jpg','image/png','image/gif','image/bmp','image/webp',
+      'application/pdf',
+      'application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv','application/csv'
+    ];
+    const allowedExt = ['.jpg','.jpeg','.png','.gif','.bmp','.webp','.pdf','.doc','.docx','.xls','.xlsx','.csv'];
+    const isAllowed = (f) => {
+      const name = String(f.name||'').toLowerCase();
+      const type = String(f.type||'').toLowerCase();
+      return allowedTypes.includes(type) || allowedExt.some(ext => name.endsWith(ext));
+    };
+    for(const f of generalNewFiles){ if(!isAllowed(f)) return toast(`File type not allowed: ${f.name}`); }
+    for(const f of fcNewFiles){ if(!isAllowed(f)) return toast(`File type not allowed: ${f.name}`); }
     const newGeneralCount = generalNewFiles.length;
     const newFcCount = fcNewFiles.length;
     // If Displayed in FC is Yes, enforce at least one FC image ONLY when editing an existing task (skip for SuperAdmin)
