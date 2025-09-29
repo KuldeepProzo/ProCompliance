@@ -75,3 +75,4 @@ SQLite database stored at `server/data/procompliance.db`.
 - Seeding: First boot creates SuperAdmin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`) and base category/company.
 - Deletions: Deleting a task removes its attachments and notes.
 - Uploads: Stored under `server/uploads/` named by UUID, metadata in `attachments`.
+- Inline preview endpoints: `/api/attachments/:id/view`, `/api/notes/:id/view` and HTML pages `/attachments/:id`, `/notes/:id`.
