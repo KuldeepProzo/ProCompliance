@@ -136,14 +136,13 @@
     api.init();
     
 
-    // search panel
-    el('toggleSearch').addEventListener('click', () => {
-      const p = el('searchPanel');
-      const newHidden = !p.hasAttribute('hidden') ? true : false;
-      if(newHidden) p.setAttribute('hidden', ''); else p.removeAttribute('hidden');
-      el('toggleSearch').setAttribute('aria-expanded', String(!newHidden));
-    });
+    // search panel (always visible now)
     el('searchForm').addEventListener('submit', onSearch);
+    // Realtime filter updates on field changes
+    qsa('#searchForm input, #searchForm select').forEach(ctrl => ctrl.addEventListener('change', ()=>{
+      const form = el('searchForm');
+      if(form){ onSearch({ preventDefault:()=>{}, currentTarget: form }); }
+    }));
     el('resetFilters').addEventListener('click', () => { state.filters = {}; render(); });
 
     // tabs
@@ -186,21 +185,24 @@
       // hydrate selects from meta
       const seedExport = ()=>{
         const meta = api.meta||{categories:[], companies:[], people:[]};
-        const xCategory = document.getElementById('xCategory'); if(xCategory){ xCategory.innerHTML='<option value="">Any</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCategory.appendChild(o); }); }
-        const xCompany = document.getElementById('xCompany'); if(xCompany){ xCompany.innerHTML='<option value="">Any</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCompany.appendChild(o); }); }
-        const xMaker = document.getElementById('xMaker'); if(xMaker){ xMaker.innerHTML='<option value="">Any</option>'; (meta.people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'Any'; xMaker.appendChild(o); }); }
+        const xCategory = document.getElementById('xCategory'); if(xCategory){ xCategory.innerHTML='<option value="">All</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCategory.appendChild(o); }); }
+        const xCompany = document.getElementById('xCompany'); if(xCompany){ xCompany.innerHTML='<option value="">All</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCompany.appendChild(o); }); }
+        const xMaker = document.getElementById('xMaker'); if(xMaker){ xMaker.innerHTML='<option value="">All</option>'; (meta.people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; xMaker.appendChild(o); }); }
+        const xChecker = document.getElementById('xChecker'); if(xChecker){ xChecker.innerHTML='<option value="">All</option>'; (meta.people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; xChecker.appendChild(o); }); }
       };
       if(sessionStorage.getItem('cf_token')){ seedExport(); }
       xf.addEventListener('change', ()=>{
         state.filters = {
           title: (document.getElementById('xTitle')||{value:''}).value.trim(),
           assignee: (document.getElementById('xMaker')||{value:''}).value,
+          checker: (document.getElementById('xChecker')||{value:''}).value,
           category_id: (document.getElementById('xCategory')||{value:''}).value,
           company_id: (document.getElementById('xCompany')||{value:''}).value,
           status: (document.getElementById('xStatus')||{value:''}).value,
           from: (document.getElementById('xFrom')||{value:''}).value,
           to: (document.getElementById('xTo')||{value:''}).value,
         };
+        // No submit button needed; reflect in export params only
       });
       xf.addEventListener('reset', ()=>{ state.filters = {}; });
       xf._bound = true;
@@ -208,6 +210,11 @@
     el('backFromExport').addEventListener('click', backToHome);
     el('backFromImport').addEventListener('click', backToHome);
     const backFromDashboard = el('backFromDashboard'); if(backFromDashboard) backFromDashboard.addEventListener('click', backToHome);
+    const df = document.getElementById('dashboardFilters');
+    if(df && !df._bound){
+      df.addEventListener('change', ()=>{ renderDashboard(); });
+      df._bound = true;
+    }
     const tmplBtn = document.getElementById('downloadImportTemplate');
     if(tmplBtn){ tmplBtn.addEventListener('click', async ()=>{
       if(!sessionStorage.getItem('cf_token')) return toast('Login required');
@@ -358,6 +365,7 @@
     fillOptions(el('qCategory'), [''].concat(categoriesNames));
     fillOptions(el('qCompany'), [''].concat(companiesNames));
     fillOptions(el('qAssignee'), [''].concat(people));
+    fillOptions(el('qChecker'), [''].concat(people));
     // Form selects use ids for reliability
     const fCat = el('fCategory'); if(fCat){ fCat.innerHTML=''; (meta.categories||[]).forEach(c=>{ const opt=document.createElement('option'); opt.value=String(c.id); opt.textContent=c.name; fCat.appendChild(opt); }); const add=document.createElement('option'); add.value='__ADD__'; add.textContent='+ Add new…'; fCat.appendChild(add); }
     const fCom = el('fCompany'); if(fCom){ fCom.innerHTML=''; (meta.companies||[]).forEach(c=>{ const opt=document.createElement('option'); opt.value=String(c.id); opt.textContent=c.name; fCom.appendChild(opt); }); const add=document.createElement('option'); add.value='__ADD__'; add.textContent='+ Add new…'; fCom.appendChild(add); }
@@ -367,13 +375,15 @@
     const sCat = el('stdCategory'); if(sCat){ sCat.innerHTML=''; (meta.categories||[]).forEach(c=>{ const opt=document.createElement('option'); opt.value=String(c.id); opt.textContent=c.name; sCat.appendChild(opt); }); }
     const sCom = el('stdApplyCompany'); if(sCom){ sCom.innerHTML=''; (meta.companies||[]).forEach(c=>{ const opt=document.createElement('option'); opt.value=String(c.id); opt.textContent=c.name; sCom.appendChild(opt); }); }
     // dashboard selects
-    const dCat = el('dCategory'); if(dCat){ dCat.innerHTML = '<option value="">Any</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; dCat.appendChild(o); }); }
-    const dCom = el('dCompany'); if(dCom){ dCom.innerHTML = '<option value="">Any</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; dCom.appendChild(o); }); }
-    const dAss = el('dAssignee'); if(dAss){ dAss.innerHTML = '<option value="">Any</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'Any'; dAss.appendChild(o); }); }
+    const dCat = el('dCategory'); if(dCat){ dCat.innerHTML = '<option value="">All</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; dCat.appendChild(o); }); }
+    const dCom = el('dCompany'); if(dCom){ dCom.innerHTML = '<option value="">All</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; dCom.appendChild(o); }); }
+    const dAss = el('dAssignee'); if(dAss){ dAss.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; dAss.appendChild(o); }); }
+    const dChk = el('dChecker'); if(dChk){ dChk.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; dChk.appendChild(o); }); }
     // export filters (populate if present)
-    const xCategory = el('xCategory'); if(xCategory){ xCategory.innerHTML = '<option value="">Any</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCategory.appendChild(o); }); }
-    const xCompany = el('xCompany'); if(xCompany){ xCompany.innerHTML = '<option value="">Any</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCompany.appendChild(o); }); }
-    const xMaker = el('xMaker'); if(xMaker){ xMaker.innerHTML = '<option value="">Any</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'Any'; xMaker.appendChild(o); }); }
+    const xCategory = el('xCategory'); if(xCategory){ xCategory.innerHTML = '<option value="">All</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCategory.appendChild(o); }); }
+    const xCompany = el('xCompany'); if(xCompany){ xCompany.innerHTML = '<option value="">All</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCompany.appendChild(o); }); }
+    const xMaker = el('xMaker'); if(xMaker){ xMaker.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; xMaker.appendChild(o); }); }
+    const xChecker = el('xChecker'); if(xChecker){ xChecker.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; xChecker.appendChild(o); }); }
   }
 
   function fillOptions(select, items){
@@ -381,7 +391,7 @@
     items.forEach(v => {
       const opt = document.createElement('option');
       opt.value = v;
-      opt.textContent = v || 'Any';
+      opt.textContent = v || 'All';
       select.appendChild(opt);
     });
   }
@@ -741,7 +751,7 @@
       else if(t.category){ const m=(api.meta.categories||[]).find(c=>c.name===t.category); if(m) el('fCategory').value=String(m.id); }
       if(t.company_id){ el('fCompany').value = String(t.company_id); }
       else if(t.company){ const m=(api.meta.companies||[]).find(c=>c.name===t.company); if(m) el('fCompany').value=String(m.id); }
-      const makerSel = el('fMaker'); if(makerSel) makerSel.value = t.assignee || 'Me';
+      const makerSel = el('fMaker'); if(makerSel) makerSel.value = t.assignee || '';
       const checkerSel = el('fChecker'); if(checkerSel) checkerSel.value = t.checker || '';
     const dueRaw = (t.dueDate || t.due_date || '');
       const isNA = String(dueRaw).toUpperCase() === 'NA';
@@ -785,7 +795,11 @@
       renderNotes(id);
     }else{
       el('taskForm').reset();
-      const makerSel2 = el('fMaker'); if(makerSel2) makerSel2.value = 'Me';
+      const makerSel2 = el('fMaker'); if(makerSel2) {
+        const meInfo = sessionStorage.getItem('cf_token') ? (await api.me().catch(()=>null)) : null;
+        const currentUserName = (meInfo && meInfo.user && meInfo.user.name) || '';
+        makerSel2.value = currentUserName || '';
+      }
       // set defaults for extended fields on create
       const vf2 = el('fValidFrom'); if(vf2) vf2.value = '';
       const crit2 = el('fCriticality'); if(crit2) crit2.value = 'medium';
@@ -816,6 +830,10 @@
       // Maker/Checker locked for non-admins
       const makerSel = el('fMaker'); if(makerSel) makerSel.disabled = !(p.can_edit);
       const checkerSel = el('fChecker'); if(checkerSel) checkerSel.disabled = !p.can_edit;
+      if(checkerSel){
+        // remove any placeholder 'Me' options if present
+        Array.from(checkerSel.options).forEach(o=>{ if(o.value==='Me') o.remove(); });
+      }
       // Additionally lock other fields for non-admin makers
       if(isEdit && isMaker && !isAdmin){
         ['fTitle','fCategory','fCompany','fCriticality','fRepeat','fRelevantFc','fDisplayedFc'].forEach(fid => { const fe = el(fid); if(fe) fe.disabled = true; });
@@ -830,12 +848,10 @@
         }
       };
       if(t){
-        const desiredMaker = (t.assignee === currentUserName) ? 'Me' : (t.assignee||'');
-        ensureOption(makerSel, desiredMaker);
-        if(makerSel && desiredMaker) makerSel.value = desiredMaker;
-        const desiredChecker = (t.checker === currentUserName) ? 'Me' : (t.checker||'');
-        ensureOption(checkerSel, desiredChecker);
-        if(checkerSel && desiredChecker) checkerSel.value = desiredChecker;
+        ensureOption(makerSel, t.assignee||'');
+        if(makerSel && t.assignee) makerSel.value = t.assignee;
+        ensureOption(checkerSel, t.checker||'');
+        if(checkerSel && t.checker) checkerSel.value = t.checker;
       }
       // create mode: hide non-create actions
       if(!isEdit){
@@ -986,6 +1002,7 @@
     state.filters = {
       title: (f.get('title')||'').toString().trim().toLowerCase(),
       assignee: f.get('assignee')||'',
+      checker: (f.get('checker')||'').toString(),
       category: f.get('category')||'',
       company: f.get('company')||'',
       from: f.get('from')||'',
@@ -1015,6 +1032,7 @@
     return items.filter(t => {
       if(f.title && !(t.title||'').toLowerCase().includes(f.title)) return false;
       if(f.assignee && t.assignee !== f.assignee) return false;
+      if(f.checker && t.checker !== f.checker) return false;
       if(f.category && t.category !== f.category) return false;
       if(f.company && t.company !== f.company) return false;
       if(f.status && t.status !== f.status) return false;
@@ -1051,8 +1069,8 @@
     }else{
       ensureSeedData();
       const tasks = getTasks();
-      const toMe = tasks.filter(t => t.assignee === 'Me');
-      const byMe = tasks.filter(t => t.assignedBy === 'Me');
+      const toMe = tasks.filter(() => false);
+      const byMe = tasks.filter(() => true);
       listA = sortItems(applyFilters(toMe));
       listB = sortItems(applyFilters(byMe));
     }
@@ -1081,11 +1099,8 @@
       tr.appendChild(tdText(crit ? crit.charAt(0).toUpperCase()+crit.slice(1).toLowerCase() : ''));
       const due = t.dueDate || t.due_date;
       tr.appendChild(tdText(formatRelativeDue(due)));
-      const meName = (sessionStorage.getItem('cf_token') && state && state.cachedMeName) ? state.cachedMeName : null;
-      const makerLabel = meName && t.assignee===meName ? 'Me' : (t.assignee||'');
-      const checkerLabel = meName && t.checker===meName ? 'Me' : (t.checker||'');
-      tr.appendChild(tdText(makerLabel));
-      tr.appendChild(tdText(checkerLabel));
+    tr.appendChild(tdText(t.assignee||''));
+    tr.appendChild(tdText(t.checker||''));
       tr.appendChild(tdText(cap((t.status||'').replace('aborted','rejected'))));
       tbody.appendChild(tr);
     });
@@ -1100,13 +1115,23 @@
     const hasExportForm = !!document.getElementById('exportFilters');
     const params = hasExportForm ? {
       title: get('xTitle').trim(),
-      assignee: get('xMaker'),
+      maker: get('xMaker'),
+      checker: get('xChecker'),
       category_id: get('xCategory'),
       company_id: get('xCompany'),
       status: get('xStatus'),
       from: get('xFrom'),
       to: get('xTo')
-    } : state.filters;
+    } : {
+      title: state.filters.title || '',
+      maker: state.filters.assignee || '',
+      checker: state.filters.checker || '',
+      category_id: state.filters.category_id || '',
+      company_id: state.filters.company_id || '',
+      status: state.filters.status || '',
+      from: state.filters.from || '',
+      to: state.filters.to || ''
+    };
     Object.entries(params).forEach(([k,v]) => { if(v) url.searchParams.set(k, v); });
     const token = sessionStorage.getItem('cf_token');
     url.searchParams.set('token', token);
@@ -1324,12 +1349,23 @@
 
   function cellActions(t){
     const td = document.createElement('td');
+    const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.gap='6px';
     const edit = document.createElement('button');
     edit.className = 'btn';
     edit.textContent = 'Edit';
     edit.addEventListener('click', () => openEditor(t.id));
-    td.appendChild(edit);
+    wrap.appendChild(edit);
+    const markBtn = document.createElement('button'); markBtn.className='btn'; markBtn.title='Mark completed'; markBtn.textContent='✓'; markBtn.addEventListener('click', ()=> bulkStatus([t.id], 'completed')); wrap.appendChild(markBtn);
+    const rejectBtn = document.createElement('button'); rejectBtn.className='btn'; rejectBtn.title='Reject'; rejectBtn.textContent='✕'; rejectBtn.addEventListener('click', ()=> bulkStatus([t.id], 'rejected')); wrap.appendChild(rejectBtn);
+    td.appendChild(wrap);
     return td;
+  }
+  function bulkStatus(ids, status){
+    if(!ids || ids.length===0) return;
+    if(!sessionStorage.getItem('cf_token')) return toast('Login required');
+    Promise.all(ids.map(id => fetch(`/api/tasks/${id}/status`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${sessionStorage.getItem('cf_token')}` }, body: JSON.stringify({ status }) })))
+      .then(()=> render())
+      .catch(()=> toast('Update failed'));
   }
   function tdText(txt){ const td = document.createElement('td'); td.textContent = txt||''; return td; }
 
@@ -1629,7 +1665,7 @@
     const btn = document.createElement('button'); btn.type='button'; btn.setAttribute('aria-label','Remove'); btn.textContent='×'; btn.addEventListener('click', ()=>chip.remove());
     chip.appendChild(btn); el('filePreview').appendChild(chip);
   }
-  // CC removed
+  
   function collectFileChips(){
     return qsa('.file-chip', el('filePreview')).map(ch => ({
       name: ch.dataset.name,
@@ -1771,6 +1807,7 @@
     const catId = (el('dCategory')||{value:''}).value||'';
     const comId = (el('dCompany')||{value:''}).value||'';
     const assignee = (el('dAssignee')||{value:''}).value||'';
+    const checker = (el('dChecker')||{value:''}).value||'';
     const criticality = (el('dCriticality')||{value:''}).value||'';
     const from = (el('dFrom')||{value:''}).value||'';
     const to = (el('dTo')||{value:''}).value||'';
@@ -1778,6 +1815,7 @@
     if(catId) url.searchParams.set('category_id', catId);
     if(comId) url.searchParams.set('company_id', comId);
     if(assignee) url.searchParams.set('assignee', assignee);
+    if(checker) url.searchParams.set('checker', checker);
     if(criticality) url.searchParams.set('criticality', criticality);
     if(from) url.searchParams.set('from', from);
     if(to) url.searchParams.set('to', to);

@@ -245,9 +245,8 @@ app.get('/api/me', auth, (req, res) => {
 app.get('/api/meta', auth, (req, res) => {
   const cats = db.prepare('SELECT id, name FROM categories ORDER BY name').all();
   const comps = db.prepare('SELECT id, name FROM companies ORDER BY name').all();
-  const me = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.sub) || {};
   const userRows = db.prepare('SELECT name FROM users ORDER BY name').all();
-  const people = ['Me'].concat((userRows||[]).map(u => u.name).filter(n => n && n !== me.name));
+  const people = (userRows||[]).map(u => u.name).filter(n => !!n);
   res.json({ categories: cats, companies: comps, people });
 });
 
@@ -524,8 +523,8 @@ app.post('/api/tasks', auth, upload.array('attachments', 10), (req, res) => {
   if(!title || !maker || !assigned_by) return res.status(400).json({ error: 'missing_fields' });
   const normalizePerson = (val, fallbackMe) => {
     const raw = String(val||'').trim();
-    if(!raw || raw.toLowerCase()==='me') return fallbackMe;
-    // If not an exact user name, fallback to Me
+    if(!raw) return fallbackMe;
+    // If not an exact user name, fallback to current user
     const row = db.prepare('SELECT 1 as x FROM users WHERE name = ?').get(raw);
     return row ? raw : fallbackMe;
   };
@@ -555,7 +554,7 @@ app.post('/api/tasks', auth, upload.array('attachments', 10), (req, res) => {
 
 // List tasks with filters and sorting
 app.get('/api/tasks', auth, (req, res) => {
-  const { title, assignee, maker, assigned_by, category_id, company_id, status, from, to, sort='due_date', dir='asc', role } = req.query;
+  const { title, assignee, maker, checker, assigned_by, category_id, company_id, status, from, to, sort='due_date', dir='asc', role } = req.query;
   const me = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.user.sub) || { name: '', role: 'viewer' };
   const roleStr = String(me.role||'').toLowerCase();
   const isSuperAdmin = roleStr==='superadmin';
@@ -567,6 +566,7 @@ app.get('/api/tasks', auth, (req, res) => {
   if(title){ sql += ' AND lower(t.title) LIKE ?'; params.push(`%${String(title).toLowerCase()}%`); }
   const makerFilter = maker || assignee;
   if(makerFilter){ sql += ' AND t.assignee = ?'; params.push(makerFilter); }
+  if(checker){ sql += ' AND t.checker = ?'; params.push(checker); }
   if(assigned_by){ sql += ' AND t.assigned_by = ?'; params.push(assigned_by); }
   if(category_id){ sql += ' AND t.category_id = ?'; params.push(Number(category_id)); }
   if(company_id){ sql += ' AND t.company_id = ?'; params.push(Number(company_id)); }
@@ -612,7 +612,7 @@ app.get('/api/tasks', auth, (req, res) => {
 
 // Dashboard aggregation endpoint
 app.get('/api/dashboard', auth, (req, res) => {
-  const { status, category_id, company_id, assignee, criticality, from, to } = req.query || {};
+  const { status, category_id, company_id, assignee, checker, criticality, from, to } = req.query || {};
   let sql = `SELECT t.*, c.name AS category, co.name AS company FROM tasks t
              LEFT JOIN categories c ON c.id = t.category_id
              LEFT JOIN companies co ON co.id = t.company_id WHERE 1=1`;
@@ -627,6 +627,7 @@ app.get('/api/dashboard', auth, (req, res) => {
   if(category_id){ sql += ' AND t.category_id = ?'; params.push(Number(category_id)); }
   if(company_id){ sql += ' AND t.company_id = ?'; params.push(Number(company_id)); }
   if(assignee){ sql += ' AND t.assignee = ?'; params.push(String(assignee)); }
+  if(checker){ sql += ' AND t.checker = ?'; params.push(String(checker)); }
   if(criticality){ sql += ' AND lower(t.criticality) = ?'; params.push(String(criticality).toLowerCase()); }
   if(from){ sql += ' AND t.due_date >= ?'; params.push(from); }
   if(to){ sql += ' AND t.due_date <= ?'; params.push(to); }
@@ -718,13 +719,15 @@ app.get('/api/tasks/export', auth, (req, res) => {
   const isAdminOnly = r==='admin';
   if(!(isSuperAdmin || isAdminOnly)) return res.status(403).json({ error: 'forbidden' });
   // reuse filter building
-  const { title, assignee, assigned_by, category_id, company_id, status, from, to, role } = req.query;
+  const { title, assignee, maker, checker, assigned_by, category_id, company_id, status, from, to, role } = req.query;
   let sql = `SELECT t.*, c.name AS category, co.name AS company FROM tasks t 
              LEFT JOIN categories c ON c.id = t.category_id
              LEFT JOIN companies co ON co.id = t.company_id WHERE 1=1`;
   const params = [];
   if(title){ sql += ' AND lower(t.title) LIKE ?'; params.push(`%${String(title).toLowerCase()}%`); }
-  if(assignee){ sql += ' AND t.assignee = ?'; params.push(assignee); }
+  const makerFilter = maker || assignee;
+  if(makerFilter){ sql += ' AND t.assignee = ?'; params.push(makerFilter); }
+  if(checker){ sql += ' AND t.checker = ?'; params.push(checker); }
   if(assigned_by){ sql += ' AND t.assigned_by = ?'; params.push(assigned_by); }
   if(category_id){ sql += ' AND t.category_id = ?'; params.push(Number(category_id)); }
   if(company_id){ sql += ' AND t.company_id = ?'; params.push(Number(company_id)); }
@@ -1167,7 +1170,7 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
   const now = new Date().toISOString();
   // Do not allow changing assigned_by; keep the original assigning admin
   const nextAssignedBy = existing.assigned_by;
-  let nextAssignee = String(body.assignee||existing.assignee) === 'Me' ? (me.name||'') : (body.assignee||existing.assignee);
+  let nextAssignee = String(body.assignee||existing.assignee) || (me.name||'');
   if(!isElevated) nextAssignee = existing.assignee; // maker cannot reassign
   const nextChecker = isElevated ? (body.checker || existing.checker) : existing.checker;
   // enforce displayed_fc == 'Yes' requires at least one image

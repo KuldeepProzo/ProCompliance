@@ -49,35 +49,46 @@
     <main id="main" class="content" role="main">
       <section class="card">
         <header class="card-header">
-          <h1 class="card-title">All Tasks</h1>
+          <div class="tabs" role="tablist">
+            <button role="tab" aria-selected="true" aria-controls="panelForMe" id="tabForMe">For Me (<span id="countForMe" class="count">0</span>)</button>
+            <button role="tab" aria-selected="false" aria-controls="panelByMe" id="tabByMe">Others (<span id="countByMe" class="count">0</span>)</button>
+          </div>
           <div class="actions">
-            <button id="toggleSearch" class="btn secondary" aria-expanded="false" aria-controls="searchPanel">Filters</button>
             <button id="addTaskBtn" class="btn primary">Add Compliance</button>
           </div>
         </header>
 
-        <div id="searchPanel" class="search-panel" hidden>
-          <form id="searchForm" class="grid" aria-label="Filter compliances">
+        <div id="searchPanel" class="search-panel one-line">
+          <form id="searchForm" class="grid one-line" aria-label="Filter compliances">
+            <div class="grid-actions left">
+              <button class="btn" type="reset" id="resetFilters">Reset</button>
+            </div>
             <label>
               <span>Title</span>
               <input id="qTitle" name="title" type="text" placeholder="Search title">
             </label>
             <label>
-              <span>Assignee</span>
+              <span>Maker</span>
               <select id="qAssignee" name="assignee">
-                <option value="">Any</option>
+                <option value="">All</option>
+              </select>
+            </label>
+            <label>
+              <span>Checker</span>
+              <select id="qChecker" name="checker">
+                <option value="">All</option>
               </select>
             </label>
             <label>
               <span>Category</span>
               <select id="qCategory" name="category">
-                <option value="">Any</option>
+                <option value="">All</option>
               </select>
             </label>
             <label>
               <span>Location / Site</span>
               <select id="qCompany" name="company">
-                <option value="">Any</option>
+                <option value="">All</option>
               </select>
             </label>
             <label>
@@ -91,22 +102,14 @@
             <label>
               <span>Status</span>
               <select id="qStatus" name="status">
-                <option value="">Any</option>
+                <option value="">All</option>
                 <option value="pending">Pending</option>
                 <option value="completed">Completed</option>
                 <option value="rejected">Rejected</option>
               </select>
             </label>
-            <div class="grid-actions">
-              <button class="btn primary" type="submit">Apply</button>
-              <button class="btn" type="reset" id="resetFilters">Reset</button>
-            </div>
+            
           </form>
-        </div>
-
-        <div class="tabs" role="tablist">
-          <button role="tab" aria-selected="true" aria-controls="panelForMe" id="tabForMe">For Me (<span id="countForMe" class="count">0</span>)</button>
-          <button role="tab" aria-selected="false" aria-controls="panelByMe" id="tabByMe">Others (<span id="countByMe" class="count">0</span>)</button>
         </div>
 
         <div class="tab-panels">
@@ -116,6 +119,7 @@
                 <caption id="forMeSummary" class="sr-only">Compliances assigned to me</caption>
                 <thead>
                   <tr>
+                    <th scope="col"><label class="sr-only" for="bulkCheckAll">Select all</label><input id="bulkCheckAll" type="checkbox"></th>
                     <th scope="col">Action</th>
                     <th scope="col"><button class="th-sort" data-sort="company">Location / Site</button></th>
                     <th scope="col"><button class="th-sort" data-sort="category">Category</button></th>
@@ -373,20 +377,24 @@
             </label>
             <label>
               <span>Maker</span>
-              <select id="xMaker"><option value="">Any</option></select>
+              <select id="xMaker"><option value="">All</option></select>
+            </label>
+            <label>
+              <span>Checker</span>
+              <select id="xChecker"><option value="">All</option></select>
             </label>
             <label>
               <span>Category</span>
-              <select id="xCategory"><option value="">Any</option></select>
+              <select id="xCategory"><option value="">All</option></select>
             </label>
             <label>
               <span>Location / Site</span>
-              <select id="xCompany"><option value="">Any</option></select>
+              <select id="xCompany"><option value="">All</option></select>
             </label>
             <label>
               <span>Status</span>
               <select id="xStatus">
-                <option value="">Any</option>
+                <option value="">All</option>
                 <option value="pending">Pending</option>
                 <option value="completed">Completed</option>
                 <option value="rejected">Rejected</option>
@@ -421,7 +429,7 @@
             <label>
               <span>Status</span>
               <select id="dStatus">
-                <option value="">Any</option>
+                <option value="">All</option>
                 <option value="pending">Pending</option>
                 <option value="completed">Completed</option>
                 <option value="rejected">Rejected</option>
@@ -440,9 +448,13 @@
               <select id="dAssignee"></select>
             </label>
             <label>
+              <span>Checker</span>
+              <select id="dChecker"></select>
+            </label>
+            <label>
               <span>Criticality</span>
               <select id="dCriticality">
-                <option value="">Any</option>
+                <option value="">All</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
