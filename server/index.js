@@ -9,6 +9,7 @@ const cron = require('node-cron');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
@@ -27,6 +28,7 @@ const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || 'no-reply@procompliance.local';
 const DEFAULT_PASSWORD = process.env.DEFAULT_PASSWORD || '';
 const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 // Ensure dirs
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -146,17 +148,38 @@ if (countComp === 0) {
 // App
 const app = express();
 app.disable('x-powered-by');
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || CORS_ORIGIN === '*') return cb(null, true);
+    const ok = CORS_ORIGIN.split(',').map(s => s.trim()).includes(origin);
+    return cb(ok ? null : new Error('CORS'), ok);
+  },
+  credentials: true
+}));
+app.use(compression());
 app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-const limiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
+// Rate limiters with standard headers and user-friendly handler
+function rateMessage(req, res) {
+  let retrySeconds = 60;
+  try {
+    if (req && req.rateLimit && req.rateLimit.resetTime) {
+      const ms = Math.max(0, req.rateLimit.resetTime - Date.now());
+      retrySeconds = Math.ceil(ms / 1000);
+    }
+  } catch (_) {}
+  res.setHeader('Retry-After', String(retrySeconds));
+  const mins = Math.max(1, Math.ceil(retrySeconds / 60));
+  return res.status(429).json({ error: 'too_many_requests', message: `Too many requests. Please try again after ${mins} minute(s).` });
+}
+const limiter = rateLimit({ windowMs: Number(process.env.RL_WINDOW_MS || 60 * 1000), max: Number(process.env.RL_MAX || 120), standardHeaders: true, legacyHeaders: false, handler: rateMessage });
 app.use(limiter);
 // Stricter limiters for auth endpoints
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
-const passwordLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false });
-const refreshLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+const authLimiter = rateLimit({ windowMs: Number(process.env.RL_AUTH_WINDOW_MS || 15 * 60 * 1000), max: Number(process.env.RL_AUTH_MAX || 20), standardHeaders: true, legacyHeaders: false, handler: rateMessage });
+const passwordLimiter = rateLimit({ windowMs: Number(process.env.RL_PW_WINDOW_MS || 60 * 60 * 1000), max: Number(process.env.RL_PW_MAX || 5), standardHeaders: true, legacyHeaders: false, handler: rateMessage });
+const refreshLimiter = rateLimit({ windowMs: Number(process.env.RL_REFRESH_WINDOW_MS || 60 * 60 * 1000), max: Number(process.env.RL_REFRESH_MAX || 60), standardHeaders: true, legacyHeaders: false, handler: rateMessage });
 
 // Auth helpers
 function sign(user) { return jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, { expiresIn: '12h' }); }

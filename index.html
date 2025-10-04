@@ -295,12 +295,12 @@
             </label>
             <label id="fcImageWrap" style="display:none">
               <span>FC Image</span>
-              <input id="fFcImage" type="file" accept="image/*">
+              <input id="fFcImage" type="file" accept="image/*,application/pdf">
             </label>
 
             <div class="span-2 attachment">
               <span>Attachments</span>
-              <input id="fFiles" type="file" aria-describedby="fileHelp">
+              <input id="fFiles" type="file" aria-describedby="fileHelp" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv">
               <small id="fileHelp">Total size should not exceed 5MB</small>
               <div id="filePreview" class="file-preview" aria-live="polite"></div>
               <div id="fileList" class="file-preview" aria-live="polite"></div>
@@ -321,7 +321,7 @@
           <h3>Notes</h3>
           <form id="noteForm" class="note-form">
             <textarea id="noteText" rows="2" placeholder="Add a note..."></textarea>
-            <input id="noteFile" type="file" aria-label="Attach file to note">
+            <input id="noteFile" type="file" aria-label="Attach file to note" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv">
             <button class="btn primary" type="submit">Add Note</button>
           </form>
           <div id="noteList" class="note-list" aria-live="polite"></div>

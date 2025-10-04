@@ -41,7 +41,7 @@
     meta: { categories:[], companies:[], people:[] },
     async loadMeta(){
       if(!this.token) return;
-      const r = await fetch('/api/meta', { headers: { Authorization: `Bearer ${this.token}` } });
+      const r = await fetch('/api/meta', { cache:'no-store', headers: { Authorization: `Bearer ${this.token}`, 'Cache-Control':'no-cache' } });
       if(r.ok){ this.meta = await r.json(); seedFromMeta(this.meta); }
     },
     async list(role){
@@ -77,26 +77,26 @@
       if(f.to){ url.searchParams.set('to', f.to); }
       if(f.status){ url.searchParams.set('status', f.status); }
       if(role) url.searchParams.set('role', role);
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${this.token}` } });
+      const r = await fetch(url, { cache:'no-store', headers: { Authorization: `Bearer ${this.token}`, 'Cache-Control':'no-cache' } });
       if(!r.ok) return { list: [] };
       return await r.json();
     },
-    async me(){ const r = await fetch('/api/me', { headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok? r.json(): { permissions:{} }; },
+    async me(){ const r = await fetch('/api/me', { cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' } }); return r.ok? r.json(): { permissions:{} }; },
     setToken(tok){ this.token = tok; sessionStorage.setItem('cf_token', tok); try{ localStorage.setItem('cf_token', tok); }catch(_e){} },
-    async get(id){ const r = await fetch(`/api/tasks/${id}`, { headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok? r.json(): null; },
-    async create(formData){ const r = await fetch('/api/tasks', { method:'POST', headers:{ Authorization:`Bearer ${this.token}` }, body: formData }); return r.ok? r.json(): null; },
+    async get(id){ const r = await fetch(`/api/tasks/${id}`, { cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' } }); return r.ok? r.json(): null; },
+    async create(formData){ const r = await fetch('/api/tasks', { method:'POST', cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' }, body: formData }); return r.ok? r.json(): null; },
     async update(id, formData){
-      const r = await fetch(`/api/tasks/${id}`, { method:'PUT', headers:{ Authorization:`Bearer ${this.token}` }, body: formData });
+      const r = await fetch(`/api/tasks/${id}`, { method:'PUT', cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' }, body: formData });
       if(r.ok) return { ok: true };
       let code = '';
       try{ const j = await r.json(); code = j && j.error; }catch(_e){}
       return { ok: false, error: code };
     },
-    async setStatus(id, status){ const r = await fetch(`/api/tasks/${id}/status`, { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${this.token}` }, body: JSON.stringify({ status }) }); return r.ok; },
-    async notes(id){ const r = await fetch(`/api/tasks/${id}/notes`, { headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok? r.json(): {notes: []}; },
-    async addNote(id, fd){ const r = await fetch(`/api/tasks/${id}/notes`, { method:'POST', headers:{ Authorization:`Bearer ${this.token}` }, body: fd }); return r.ok; },
-    async deleteAttachment(attId){ const r = await fetch(`/api/attachments/${attId}`, { method:'DELETE', headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok; },
-    async requestEdit(id){ const r = await fetch(`/api/tasks/${id}/request_edit`, { method:'POST', headers:{ Authorization:`Bearer ${this.token}` } }); return r.ok; }
+    async setStatus(id, status){ const r = await fetch(`/api/tasks/${id}/status`, { method:'POST', cache:'no-store', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' }, body: JSON.stringify({ status }) }); return r.ok; },
+    async notes(id){ const r = await fetch(`/api/tasks/${id}/notes`, { cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' } }); return r.ok? r.json(): {notes: []}; },
+    async addNote(id, fd){ const r = await fetch(`/api/tasks/${id}/notes`, { method:'POST', cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' }, body: fd }); return r.ok; },
+    async deleteAttachment(attId){ const r = await fetch(`/api/attachments/${attId}`, { method:'DELETE', cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' } }); return r.ok; },
+    async requestEdit(id){ const r = await fetch(`/api/tasks/${id}/request_edit`, { method:'POST', cache:'no-store', headers:{ Authorization:`Bearer ${this.token}`, 'Cache-Control':'no-cache' } }); return r.ok; }
   };
 
   function init(){

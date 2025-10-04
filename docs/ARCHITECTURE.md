@@ -4,7 +4,7 @@ This document explains the structure, data flow, and key behaviors (roles, tabs,
 
 ## Overview
 - Frontend: vanilla HTML/CSS/JS (no framework). Entry: `index.html`, logic in `assets/js/app.js`, styles in `assets/css/app.css`.
-- Backend: Express `server/index.js` with SQLite (better-sqlite3), uploads (multer), email (nodemailer), rate limits, helmet, cron.
+- Backend: Express `server/index.js` with SQLite (better-sqlite3), uploads (multer), email (nodemailer), rate limits, helmet, compression, cron, and CORS.
 - Database: single SQLite file `server/data/procompliance.db`. Uploads in `server/uploads`.
  - Branding: Application is named "ProCompliance" in UI, logs, and emails.
 
@@ -26,6 +26,8 @@ This document explains the structure, data flow, and key behaviors (roles, tabs,
   - Admin: read-only Users list (email, name). Can add Viewer users.
 - Standards: manage and apply standards to locations to generate tasks.
 - Dashboard: filters and charts/stat cards via `/api/dashboard`.
+  - Overdue Buckets chart groups overdue by ranges (Over 1 Year, 3 Months – 1 Year, 1 – 3 Months, Less than 1 Month).
+  - Multi-select floating filters for Category, FC Name, Maker, Checker, Status, Criticality, Over due.
 
 ## Backend
 - Auth endpoints: `/api/auth/login`, `/api/auth/forgot`, `/api/auth/reset`.
@@ -49,8 +51,9 @@ This document explains the structure, data flow, and key behaviors (roles, tabs,
 
 ### Uploads & FC Image (server)
 - Accepts up to 10 files in `attachments`.
-- FC requirements enforced on server for Displayed in FC = Yes (must have image-type file either new or existing on update).
-- Client additionally tags FC filename with `__fc_image` (stored as-is).
+- FC requirements enforced on server for Displayed in FC = Yes (must have image/PDF either new or existing on update; SuperAdmin exempt).
+- Client tags FC filename with `__fc_image` (stored as-is).
+- Allowed types: images, PDF, DOC/DOCX, XLS/XLSX, CSV (validated client and server). Combined size ≤ 5MB per request.
 
 ### Emails/Notifications
 - Assignment: to Maker (fallback Assigner).
@@ -60,6 +63,13 @@ This document explains the structure, data flow, and key behaviors (roles, tabs,
 - Grouped Reminders (cron): to Makers, Checkers, SuperAdmins (all), Admins (their categories only).
 - Grouped assignment emails when bulk-creating (Standards Apply, CSV import).
 - Links use `APP_URL` and are shown above the table; anchor text is "ProCompliance".
+
+## Security & Ops
+- Helmet for security headers; CORS restricted by `CORS_ORIGIN`.
+- Rate limiting (env-tunable): global, login, password reset, refresh. 429 JSON with `Retry-After` header.
+- Compression enabled.
+- JWT in `Authorization` header; token query allowed for preview links (`?token=`).
+- SQLite stored under `server/data/`; uploads under `server/uploads/`.
 
 ## Database
 See `docs/DATABASE.md` for table definitions and relationships.
