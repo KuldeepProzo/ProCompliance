@@ -247,7 +247,9 @@ app.get('/api/meta', auth, (req, res) => {
   const comps = db.prepare('SELECT id, name FROM companies ORDER BY name').all();
   const userRows = db.prepare('SELECT name FROM users ORDER BY name').all();
   const people = (userRows||[]).map(u => u.name).filter(n => !!n);
-  res.json({ categories: cats, companies: comps, people });
+  const titleRows = db.prepare('SELECT DISTINCT title FROM tasks ORDER BY title COLLATE NOCASE').all();
+  const titles = (titleRows||[]).map(r => r.title).filter(Boolean);
+  res.json({ categories: cats, companies: comps, people, titles });
 });
 
 // Settings meta (admin): surface default password value to UI
@@ -564,15 +566,22 @@ app.get('/api/tasks', auth, (req, res) => {
              LEFT JOIN companies co ON co.id = t.company_id WHERE 1=1`;
   const params = [];
   if(title){ sql += ' AND lower(t.title) LIKE ?'; params.push(`%${String(title).toLowerCase()}%`); }
-  const makerFilter = maker || assignee;
-  if(makerFilter){ sql += ' AND t.assignee = ?'; params.push(makerFilter); }
-  if(checker){ sql += ' AND t.checker = ?'; params.push(checker); }
-  if(assigned_by){ sql += ' AND t.assigned_by = ?'; params.push(assigned_by); }
-  if(category_id){ sql += ' AND t.category_id = ?'; params.push(Number(category_id)); }
-  if(company_id){ sql += ' AND t.company_id = ?'; params.push(Number(company_id)); }
-  if(status){ sql += ' AND t.status = ?'; params.push(status); }
-  if(from){ sql += ' AND t.due_date >= ?'; params.push(from); }
-  if(to){ sql += ' AND t.due_date <= ?'; params.push(to); }
+  // Support CSV lists for multi-select fields
+  const parseCSV = (v)=> String(v||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const makerList = parseCSV(maker || assignee);
+  if(makerList.length){ sql += ` AND t.assignee IN (${makerList.map(()=>'?').join(',')})`; params.push(...makerList); }
+  const checkerList = parseCSV(checker);
+  if(checkerList.length){ sql += ` AND t.checker IN (${checkerList.map(()=>'?').join(',')})`; params.push(...checkerList); }
+  const assignedByList = parseCSV(assigned_by);
+  if(assignedByList.length){ sql += ` AND t.assigned_by IN (${assignedByList.map(()=>'?').join(',')})`; params.push(...assignedByList); }
+  const categoryList = parseCSV(category_id);
+  if(categoryList.length){ sql += ` AND t.category_id IN (${categoryList.map(()=>'?').join(',')})`; params.push(...categoryList.map(Number)); }
+  const companyList = parseCSV(company_id);
+  if(companyList.length){ sql += ` AND t.company_id IN (${companyList.map(()=>'?').join(',')})`; params.push(...companyList.map(Number)); }
+  const statusList = parseCSV(status);
+  if(statusList.length){ sql += ` AND t.status IN (${statusList.map(()=>'?').join(',')})`; params.push(...statusList); }
+  if(from){ sql += ' AND t.due_date != ? AND t.due_date >= ?'; params.push('NA', from); }
+  if(to){ sql += ' AND t.due_date != ? AND t.due_date <= ?'; params.push('NA', to); }
   let filteredByAssignee = false;
   // Apply tab role filters for all users (including admins) so tabs behave consistently
   if(role === 'to-me'){
@@ -612,7 +621,7 @@ app.get('/api/tasks', auth, (req, res) => {
 
 // Dashboard aggregation endpoint
 app.get('/api/dashboard', auth, (req, res) => {
-  const { status, category_id, company_id, assignee, checker, criticality, from, to } = req.query || {};
+  const { status, category_id, company_id, assignee, checker, criticality, from, to, overdue } = req.query || {};
   let sql = `SELECT t.*, c.name AS category, co.name AS company FROM tasks t
              LEFT JOIN categories c ON c.id = t.category_id
              LEFT JOIN companies co ON co.id = t.company_id WHERE 1=1`;
@@ -629,13 +638,14 @@ app.get('/api/dashboard', auth, (req, res) => {
   if(assignee){ sql += ' AND t.assignee = ?'; params.push(String(assignee)); }
   if(checker){ sql += ' AND t.checker = ?'; params.push(String(checker)); }
   if(criticality){ sql += ' AND lower(t.criticality) = ?'; params.push(String(criticality).toLowerCase()); }
-  if(from){ sql += ' AND t.due_date >= ?'; params.push(from); }
-  if(to){ sql += ' AND t.due_date <= ?'; params.push(to); }
+  if(from){ sql += ' AND t.due_date != ? AND t.due_date >= ?'; params.push('NA', from); }
+  if(to){ sql += ' AND t.due_date != ? AND t.due_date <= ?'; params.push('NA', to); }
   const rows = db.prepare(sql).all(...params);
   const today = new Date();
   const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const buckets = {};
   const bucketsByCrit = { high: {}, medium: {}, low: {} };
+  const overdueBuckets = { 'Over 1 Year':0, '3 Months – 1 Year':0, '1 – 3 Months':0, 'Less than 1 Month':0 };
   const inc = (obj, key) => { obj[key] = (obj[key]||0) + 1; };
   const statusCounts = { pending:0, completed:0 }; // rejected rolls into pending
   const criticalityCounts = { high:0, medium:0, low:0, unknown:0 };
@@ -677,6 +687,30 @@ app.get('/api/dashboard', auth, (req, res) => {
     const d = new Date(dstr);
     if(isNaN(d.getTime())) { inc(buckets, 'Unknown'); continue; }
     const diffDays = Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - startOfToday) / (24*3600*1000));
+    // Overdue filtering and bucket computation
+    if(diffDays < 0){
+      const od = Math.abs(diffDays);
+      let bucketName = '';
+      if(od > 365) bucketName = 'Over 1 Year';
+      else if(od >= 90 && od <= 365) bucketName = '3 Months – 1 Year';
+      else if(od >= 30 && od < 90) bucketName = '1 – 3 Months';
+      else if(od > 0 && od < 30) bucketName = 'Less than 1 Month';
+      if(bucketName){ overdueBuckets[bucketName] = (overdueBuckets[bucketName]||0) + 1; }
+      // If an overdue filter is applied, skip rows not in selected bucket
+      if(overdue){
+        const sel = String(overdue);
+        const matches = (
+          (sel==='over_1y' && od > 365) ||
+          (sel==='m3_1y' && od >= 90 && od <= 365) ||
+          (sel==='m1_3m' && od >= 30 && od < 90) ||
+          (sel==='lt_1m' && od > 0 && od < 30)
+        );
+        if(!matches) continue;
+      }
+    } else if(overdue){
+      // Non-overdue rows are excluded when overdue filter is present
+      continue;
+    }
     const critKey = (cr==='high'||cr==='medium'||cr==='low')? cr : 'low';
     if(diffDays < 0){ inc(buckets, 'Overdue'); inc(bucketsByCrit[critKey], 'Overdue'); }
     else if(diffDays === 0){ inc(buckets, 'Today'); inc(bucketsByCrit[critKey], 'Today'); }
@@ -700,6 +734,7 @@ app.get('/api/dashboard', auth, (req, res) => {
     total: rows.length,
     buckets,
     bucketsByCrit,
+    overdueBuckets,
     statusCounts,
     criticalityCounts,
     byCategoryStatus: byCategoryStatusArr,
@@ -719,7 +754,7 @@ app.get('/api/tasks/export', auth, (req, res) => {
   const isAdminOnly = r==='admin';
   if(!(isSuperAdmin || isAdminOnly)) return res.status(403).json({ error: 'forbidden' });
   // reuse filter building
-  const { title, assignee, maker, checker, assigned_by, category_id, company_id, status, from, to, role } = req.query;
+  const { title, assignee, maker, checker, assigned_by, category_id, company_id, status, from, to, role, overdue } = req.query;
   let sql = `SELECT t.*, c.name AS category, co.name AS company FROM tasks t 
              LEFT JOIN categories c ON c.id = t.category_id
              LEFT JOIN companies co ON co.id = t.company_id WHERE 1=1`;
@@ -734,6 +769,10 @@ app.get('/api/tasks/export', auth, (req, res) => {
   if(status){ sql += ' AND t.status = ?'; params.push(status); }
   if(from){ sql += ' AND t.due_date >= ?'; params.push(from); }
   if(to){ sql += ' AND t.due_date <= ?'; params.push(to); }
+  if(overdue){
+    // Apply overdue bucket filtering server-side for export
+    // We cannot compute in SQL easily due to NA; so fetch and filter after query
+  }
   let filteredByAssignee = false;
   if(!(isSuperAdmin || isAdminOnly)){
     if(role === 'to-me'){ sql += ' AND (t.assignee = ? OR (t.checker = ? AND t.submitted_at IS NOT NULL))'; params.push(me.name, me.name); filteredByAssignee = true; }
@@ -745,9 +784,27 @@ app.get('/api/tasks/export', auth, (req, res) => {
     else { sql += ` AND t.category_id IN (${allowed.map(()=>'?').join(',')})`; params.push(...allowed); }
   }
   sql += ' ORDER BY due_date ASC';
-  const rows = db.prepare(sql).all(...params);
+  let rows = db.prepare(sql).all(...params);
+  if(overdue){
+    const today = new Date();
+    const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    rows = rows.filter(r => {
+      const dstr = r.due_date;
+      if(!dstr || String(dstr).toUpperCase()==='NA') return false;
+      const d = new Date(dstr);
+      if(isNaN(d.getTime())) return false;
+      const diffDays = Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - startOfToday) / (24*3600*1000));
+      if(diffDays >= 0) return false;
+      const od = Math.abs(diffDays);
+      if(overdue==='over_1y') return od > 365;
+      if(overdue==='m3_1y') return od >= 90 && od <= 365;
+      if(overdue==='m1_3m') return od >= 30 && od < 90;
+      if(overdue==='lt_1m') return od > 0 && od < 30;
+      return true;
+    });
+  }
   const header = [
-    'Title','Description','Category','Location / Site','Maker','Checker','AssignedBy',
+    'Title','Description','Category','FC Name','Maker','Checker','AssignedBy',
     'DueDate','ValidFrom','Criticality','LicenseOwner','RelevantFC','DisplayedFC','Status','CreatedAt'
   ];
   const esc = v => {
@@ -796,7 +853,7 @@ app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), as
     if(!title) continue;
     const description = cols[idx('description')] || '';
     const categoryName = cols[idx('category')] || '';
-    const companyName = cols[idx('company')] || cols[idx('location / site')] || '';
+    const companyName = cols[idx('company')] || cols[idx('FC Name')] || '';
     const makerEmail = cols[idx('maker_email')] || '';
     const checkerEmail = cols[idx('checker_email')] || '';
     // resolve maker by email; create viewer if not exists
@@ -879,7 +936,7 @@ app.post('/api/tasks/import', auth, requireSuperAdmin, upload.single('file'), as
 // Import template CSV (header only) - excludes AssignedBy, CreatedAt, Status per requirements
 app.get('/api/tasks/import/template', auth, requireSuperAdmin, (req, res) => {
   const header = [
-    'Title','Description','Category','Location / Site','Maker_email','Checker_email','DueDate','ValidFrom','Criticality','LicenseOwner','RelevantFC','DisplayedFC'
+    'Title','Description','Category','FC Name','Maker_email','Checker_email','DueDate','ValidFrom','Criticality','LicenseOwner','RelevantFC','DisplayedFC'
   ];
   const csv = header.join(',') + '\n';
   res.setHeader('Content-Type', 'text/csv');
@@ -932,7 +989,7 @@ async function sendReminderEmail(task){
     .filter(Boolean).join(',');
   if(!to) return false;
   const subject = `[Reminder] ${task.title} ${task.due_date && String(task.due_date).toUpperCase()!=='NA'? 'due '+task.due_date : ''}`.trim();
-  const body = `Title: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/tasks to view compliances.`;
+  const body = `Title: ${task.title}\nFC Name: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/tasks to view compliances.`;
   try{
     const info = await mailer.sendMail({ from: {
       name: "ProCompliance",
@@ -1006,7 +1063,7 @@ function buildTasksTable(tasks){
     <thead>
       <tr style="background:#f5f5f5;">
         <th align="left">Title</th>
-        <th align="left">Location / Site</th>
+        <th align="left">FC Name</th>
         <th align="left">Category</th>
         <th align="left">Maker</th>
         <th align="left">Checker</th>
@@ -1252,7 +1309,7 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
       if(String(existing.title||'') !== String(next.title||'')) changes.push(`Title: '${trunc(existing.title||'')}' → '${trunc(next.title||'')}'`);
       if(String(existing.description||'') !== String(next.description||'')) changes.push(`Description: '${trunc(existing.description||'')}' → '${trunc(next.description||'')}'`);
       if((existing.category_id||null) !== (next.category_id||null)) changes.push(`Category: '${trunc(oldCat||'')}' → '${trunc(newCat||'')}'`);
-      if((existing.company_id||null) !== (next.company_id||null)) changes.push(`Location / Site: '${trunc(oldCom||'')}' → '${trunc(newCom||'')}'`);
+      if((existing.company_id||null) !== (next.company_id||null)) changes.push(`FC Name: '${trunc(oldCom||'')}' → '${trunc(newCom||'')}'`);
       if(String(existing.due_date||'') !== String(next.due_date||'')) changes.push(`Due Date: '${trunc(existing.due_date||'')}' → '${trunc(next.due_date||'')}'`);
       if(String(existing.valid_from||'') !== String(next.valid_from||'')) changes.push(`Valid From: '${trunc(existing.valid_from||'')}' → '${trunc(next.valid_from||'')}'`);
       if(String(existing.criticality||'') !== String(next.criticality||'')) changes.push(`Criticality: '${trunc(existing.criticality||'')}' → '${trunc(next.criticality||'')}'`);
@@ -1279,7 +1336,7 @@ app.put('/api/tasks/:id', auth, upload.array('attachments', 10), (req, res) => {
       if(String(existing.title||'') !== String(next.title||'')) changes.push(`Title: '${trunc(existing.title||'')}' → '${trunc(next.title||'')}'`);
       if(String(existing.description||'') !== String(next.description||'')) changes.push(`Description: '${trunc(existing.description||'')}' → '${trunc(next.description||'')}'`);
       if((existing.category_id||null) !== (next.category_id||null)) changes.push(`Category: '${trunc(oldCat||'')}' → '${trunc(newCat||'')}'`);
-      if((existing.company_id||null) !== (next.company_id||null)) changes.push(`Location / Site: '${trunc(oldCom||'')}' → '${trunc(newCom||'')}'`);
+      if((existing.company_id||null) !== (next.company_id||null)) changes.push(`FC Name: '${trunc(oldCom||'')}' → '${trunc(newCom||'')}'`);
       if(String(existing.due_date||'') !== String(next.due_date||'')) changes.push(`Valid Till: '${trunc(existing.due_date||'')}' → '${trunc(next.due_date||'')}'`);
       if(String(existing.valid_from||'') !== String(next.valid_from||'')) changes.push(`Valid From: '${trunc(existing.valid_from||'')}' → '${trunc(next.valid_from||'')}'`);
       if(String(existing.criticality||'') !== String(next.criticality||'')) changes.push(`Criticality: '${trunc(existing.criticality||'')}' → '${trunc(next.criticality||'')}'`);
@@ -1537,7 +1594,7 @@ async function sendAssignmentNotification(task){
   const salutation = `Hi ${name},`;
   const intro = 'You have been assigned a new compliance. Please review the details below.';
   const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n  </div>`;
-  const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to view this compliance.`;
+  const text = `Hi ${name},\n\nYou have been assigned a new compliance. Please review the details below.\n\nTitle: ${task.title}\nFC Name: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to view this compliance.`;
   const subject = `[Assigned] ${task.title}`;
   try{
     console.log('[email] sendAssignmentNotification attempt', { to, taskId: task.id, assignee: task.assignee });
@@ -1556,7 +1613,7 @@ async function sendReopenForEditsNotification(task, actorName){
   const salutation = `Hi ${name},`;
   const intro = `${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes.`;
   const html = `<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;\">\n    <p>${htmlEscape(salutation)}</p>\n    <p>${htmlEscape(intro)}</p>\n    <p>Visit <a href=\"${APP_URL}/#/edit/${task.id}\">ProCompliance</a> to view this compliance.</p>\n    ${buildTasksTable([task])}\n  </div>`;
-  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes.\n\nTitle: ${task.title}\nLocation / Site: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to edit this compliance.`;
+  const text = `Hi ${name},\n\n${actorName||'An admin'} has reopened the compliance for edits. Please make the required changes.\n\nTitle: ${task.title}\nFC Name: ${task.company||''}\nCategory: ${task.category||''}\nMaker: ${task.assignee||''}\nChecker: ${task.checker||''}\nDue: ${task.due_date||'NA'}\nStatus: ${task.status}\n\nVisit ${APP_URL}/#/edit/${task.id} to edit this compliance.`;
   const subject = `[Reopened for Edits] ${task.title}`;
   try{ const info = await mailer.sendMail({ from:{ name:'ProCompliance', address: SMTP_FROM }, to, subject, html, text }); return !!(info && (info.accepted||[]).length); }catch(_e){ return false; }
 }

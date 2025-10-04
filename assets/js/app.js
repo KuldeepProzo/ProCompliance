@@ -48,8 +48,29 @@
       const url = new URL('/api/tasks', location.origin);
       const f = { ...state.filters };
       // map category/company names to ids
-      if(f.category){ const c = (this.meta.categories||[]).find(x=>x.name===f.category); if(c){ url.searchParams.set('category_id', String(c.id)); } }
-      if(f.company){ const c = (this.meta.companies||[]).find(x=>x.name===f.company); if(c){ url.searchParams.set('company_id', String(c.id)); } }
+      // Support multi-selects by passing CSV lists
+      const joinOr = (v)=> Array.isArray(v)? v.join(',') : (v||'');
+      if(f.category && f.category.length){
+        // convert category names to ids
+        const ids = f.category.map(name => {
+          const c = (this.meta.categories||[]).find(x=>x.name===name);
+          return c? String(c.id): null;
+        }).filter(Boolean);
+        if(ids.length) url.searchParams.set('category_id', ids.join(','));
+      }
+      if(f.company && f.company.length){
+        const ids = f.company.map(name => {
+          const c = (this.meta.companies||[]).find(x=>x.name===name);
+          return c? String(c.id): null;
+        }).filter(Boolean);
+        if(ids.length) url.searchParams.set('company_id', ids.join(','));
+      }
+      if(f.title){ url.searchParams.set('title', f.title); }
+      if(Array.isArray(f.assignee) && f.assignee.length){ url.searchParams.set('assignee', joinOr(f.assignee)); }
+      if(Array.isArray(f.checker) && f.checker.length){ url.searchParams.set('checker', joinOr(f.checker)); }
+      if(f.from){ url.searchParams.set('from', f.from); }
+      if(f.to){ url.searchParams.set('to', f.to); }
+      if(Array.isArray(f.status) && f.status.length){ url.searchParams.set('status', joinOr(f.status)); }
       if(f.title){ url.searchParams.set('title', f.title); }
       if(f.assignee){ url.searchParams.set('assignee', f.assignee); }
       if(f.from){ url.searchParams.set('from', f.from); }
@@ -104,6 +125,8 @@
         
         state.isAdmin = (me.user && (me.user.role==='superadmin' || me.user.role==='admin'));
         state.cachedMeName = (me.user && me.user.name) || '';
+        state.isSuperAdmin = !!(me.user && me.user.role==='superadmin');
+        state.allowedCategoryIds = Array.isArray(me.allowed_category_ids) ? me.allowed_category_ids.map(Number) : [];
         const isSuperAdmin = (me.user && me.user.role==='superadmin');
         const stdLink = document.querySelector('.menu a[href="#/standards"]'); if(stdLink) stdLink.parentElement.style.display = state.isAdmin? '' : 'none';
         const setLink = document.querySelector('.menu a[href="#/settings"]'); if(setLink) setLink.parentElement.style.display = state.isAdmin? '' : 'none';
@@ -134,7 +157,7 @@
 
     // API init
     api.init();
-    
+
 
     // search panel (always visible now)
     el('searchForm').addEventListener('submit', onSearch);
@@ -143,7 +166,9 @@
       const form = el('searchForm');
       if(form){ onSearch({ preventDefault:()=>{}, currentTarget: form }); }
     }));
-    el('resetFilters').addEventListener('click', () => { state.filters = {}; render(); });
+    // Enhance multi-selects to pop out menus
+    setupMultiSelects();
+    el('resetFilters').addEventListener('click', (ev) => { ev.preventDefault(); resetSearchFilters(); });
 
     // tabs
     el('tabForMe').addEventListener('click', () => { try{ localStorage.setItem('cf_tasks_tab','to-me'); }catch(_e){} location.hash = '#/tasks?tab=to'; });
@@ -164,6 +189,16 @@
 
     // add/edit form
     el('addTaskBtn').addEventListener('click', () => { if(!state.isAdmin){ toast('Admin only'); return; } openEditor(); });
+    const bulkComplete = el('bulkComplete'); if(bulkComplete){ bulkComplete.addEventListener('click', ()=>{
+      const ids = Array.from(qsa('#listForMe .row-check:checked, #listByMe .row-check:checked')).map(cb => Number(cb.value));
+      if(ids.length===0) return toast('Select tasks');
+      bulkStatus(ids, 'completed');
+    }); }
+    const bulkReject = el('bulkReject'); if(bulkReject){ bulkReject.addEventListener('click', ()=>{
+      const ids = Array.from(qsa('#listForMe .row-check:checked, #listByMe .row-check:checked')).map(cb => Number(cb.value));
+      if(ids.length===0) return toast('Select tasks');
+      bulkStatus(ids, 'rejected');
+    }); }
     el('backToList').addEventListener('click', () => showList());
     el('fCategory').addEventListener('change', onInlineAddCategory);
     el('fCompany').addEventListener('change', onInlineAddCompany);
@@ -204,7 +239,7 @@
         };
         // No submit button needed; reflect in export params only
       });
-      xf.addEventListener('reset', ()=>{ state.filters = {}; });
+      xf.addEventListener('reset', (e)=>{ e.preventDefault(); resetExportFilters(); });
       xf._bound = true;
     }
     el('backFromExport').addEventListener('click', backToHome);
@@ -213,6 +248,7 @@
     const df = document.getElementById('dashboardFilters');
     if(df && !df._bound){
       df.addEventListener('change', ()=>{ renderDashboard(); });
+      const resetBtn = document.getElementById('dReset'); if(resetBtn){ resetBtn.addEventListener('click', (e)=>{ e.preventDefault(); resetDashboardFilters(); }); }
       df._bound = true;
     }
     const tmplBtn = document.getElementById('downloadImportTemplate');
@@ -366,6 +402,14 @@
     fillOptions(el('qCompany'), [''].concat(companiesNames));
     fillOptions(el('qAssignee'), [''].concat(people));
     fillOptions(el('qChecker'), [''].concat(people));
+    // Refresh multi-select display text after options load
+    qsa('.ms').forEach(ms=>{
+      const id = ms.getAttribute('data-target'); const sel = document.getElementById(id); const disp = ms.querySelector('.ms-display');
+      if(sel && disp){ const vals = Array.from(sel.selectedOptions).map(o=>o.value).filter(Boolean); disp.textContent = (vals.length? vals.join(', ') : 'All'); }
+    });
+    // Titles for filter dropdown
+    const titles = (meta.titles||[]);
+    const qTitleList = document.getElementById('qTitleList'); if(qTitleList){ qTitleList.innerHTML=''; titles.forEach(ti=>{ const o=document.createElement('option'); o.value=ti; qTitleList.appendChild(o); }); }
     // Form selects use ids for reliability
     const fCat = el('fCategory'); if(fCat){ fCat.innerHTML=''; (meta.categories||[]).forEach(c=>{ const opt=document.createElement('option'); opt.value=String(c.id); opt.textContent=c.name; fCat.appendChild(opt); }); const add=document.createElement('option'); add.value='__ADD__'; add.textContent='+ Add new…'; fCat.appendChild(add); }
     const fCom = el('fCompany'); if(fCom){ fCom.innerHTML=''; (meta.companies||[]).forEach(c=>{ const opt=document.createElement('option'); opt.value=String(c.id); opt.textContent=c.name; fCom.appendChild(opt); }); const add=document.createElement('option'); add.value='__ADD__'; add.textContent='+ Add new…'; fCom.appendChild(add); }
@@ -380,8 +424,8 @@
     const dAss = el('dAssignee'); if(dAss){ dAss.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; dAss.appendChild(o); }); }
     const dChk = el('dChecker'); if(dChk){ dChk.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; dChk.appendChild(o); }); }
     // export filters (populate if present)
-    const xCategory = el('xCategory'); if(xCategory){ xCategory.innerHTML = '<option value="">All</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCategory.appendChild(o); }); }
-    const xCompany = el('xCompany'); if(xCompany){ xCompany.innerHTML = '<option value="">All</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=String(c.id); o.textContent=c.name; xCompany.appendChild(o); }); }
+    const xCategory = el('xCategory'); if(xCategory){ xCategory.innerHTML = '<option value="">All</option>'; (meta.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.name; o.textContent=c.name; xCategory.appendChild(o); }); }
+    const xCompany = el('xCompany'); if(xCompany){ xCompany.innerHTML = '<option value="">All</option>'; (meta.companies||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.name; o.textContent=c.name; xCompany.appendChild(o); }); }
     const xMaker = el('xMaker'); if(xMaker){ xMaker.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; xMaker.appendChild(o); }); }
     const xChecker = el('xChecker'); if(xChecker){ xChecker.innerHTML = '<option value="">All</option>'; (people||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p||'All'; xChecker.appendChild(o); }); }
   }
@@ -547,8 +591,9 @@
         itemsWrap.appendChild(row);
         const makerSel = row.querySelector('[data-maker]');
         const checkerSel = row.querySelector('[data-checker]');
-        if(makerSel){ fillOptions(makerSel, (api.meta.people||[])); makerSel.value = 'Me'; }
-        if(checkerSel){ fillOptions(checkerSel, (api.meta.people||[]).filter(p => p)); checkerSel.value = 'Me'; }
+        const currentUser = (state && state.cachedMeName) ? state.cachedMeName : ((api.meta && api.meta.me && api.meta.me.name) || '');
+        if(makerSel){ fillOptions(makerSel, (api.meta.people||[])); if(currentUser){ makerSel.value = currentUser; } }
+        if(checkerSel){ fillOptions(checkerSel, (api.meta.people||[]).filter(p => p)); if(currentUser){ checkerSel.value = currentUser; } }
       });
       const selectAll = document.getElementById('stdSelectAll');
       if(selectAll && !selectAll._bound){
@@ -998,18 +1043,53 @@
 
   function onSearch(e){
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const getMulti = (id)=>{
+      const el = document.getElementById(id);
+      if(!el) return [];
+      if(el.multiple){ return Array.from(el.selectedOptions).map(o=>o.value).filter(Boolean); }
+      const v = el.value; return v? [v]: [];
+    };
     state.filters = {
-      title: (f.get('title')||'').toString().trim().toLowerCase(),
-      assignee: f.get('assignee')||'',
-      checker: (f.get('checker')||'').toString(),
-      category: f.get('category')||'',
-      company: f.get('company')||'',
-      from: f.get('from')||'',
-      to: f.get('to')||'',
-      status: f.get('status')||''
+      title: (document.getElementById('qTitle')||{value:''}).value.toString(),
+      assignee: getMulti('qAssignee'),
+      checker: getMulti('qChecker'),
+      category: getMulti('qCategory'),
+      company: getMulti('qCompany'),
+      criticality: getMulti('qCriticality'),
+      from: (document.getElementById('qFrom')||{value:''}).value,
+      to: (document.getElementById('qTo')||{value:''}).value,
+      overdue: getMulti('qOverdue'),
+      status: getMulti('qStatus')
     };
     render();
+  }
+
+  function resetSearchFilters(){
+    state.filters = {};
+    const form = el('searchForm'); if(!form) return;
+    // Clear inputs
+    ['qTitle','qFrom','qTo'].forEach(id => { const n = document.getElementById(id); if(n) n.value=''; });
+    // Clear selects (including multi)
+    qsa('#searchForm select').forEach(sel => { Array.from(sel.options).forEach(o=> o.selected = false); });
+    // Update multi-select displays
+    qsa('.ms .ms-display').forEach(d => d.textContent = 'All');
+    render();
+  }
+
+  function resetExportFilters(){
+    const form = el('exportFilters'); if(!form) return;
+    ['xTitle','xFrom','xTo'].forEach(id => { const n = document.getElementById(id); if(n) n.value=''; });
+    qsa('#exportFilters select').forEach(sel => { Array.from(sel.options).forEach(o=> o.selected = false); });
+    qsa('#exportFilters .ms .ms-display').forEach(d => d.textContent = 'All');
+  }
+
+  function resetDashboardFilters(){
+    const form = el('dashboardFilters'); if(!form) return;
+    ['dFrom','dTo'].forEach(id => { const n = document.getElementById(id); if(n) n.value=''; });
+    qsa('#dashboardFilters select').forEach(sel => { Array.from(sel.options).forEach(o=> o.selected = false); });
+    qsa('#dashboardFilters .ms .ms-display').forEach(d => d.textContent = 'All');
+    renderDashboard();
   }
 
   function onSort(key){
@@ -1030,15 +1110,109 @@
   function applyFilters(items){
     const f = state.filters;
     return items.filter(t => {
-      if(f.title && !(t.title||'').toLowerCase().includes(f.title)) return false;
-      if(f.assignee && t.assignee !== f.assignee) return false;
-      if(f.checker && t.checker !== f.checker) return false;
-      if(f.category && t.category !== f.category) return false;
-      if(f.company && t.company !== f.company) return false;
-      if(f.status && t.status !== f.status) return false;
-      if(f.from && (t.dueDate||'') < f.from) return false;
-      if(f.to && (t.dueDate||'') > f.to) return false;
+      if(f.title && f.title !== (t.title||'')) return false;
+      // Client-side AND checks for multi-selects as well
+      if(Array.isArray(f.company) && f.company.length && !f.company.includes(t.company)) return false;
+      if(Array.isArray(f.category) && f.category.length && !f.category.includes(t.category)) return false;
+      if(Array.isArray(f.assignee) && f.assignee.length && !f.assignee.includes(t.assignee)) return false;
+      if(Array.isArray(f.checker) && f.checker.length && !f.checker.includes(t.checker)) return false;
+      if(Array.isArray(f.status) && f.status.length && !f.status.includes(t.status)) return false;
+      // Criticality and overdue
+      if(Array.isArray(f.criticality) && f.criticality.length){ const tc=String(t.criticality||'').toLowerCase(); if(!f.criticality.includes(tc)) return false; }
+      const dueStr = (t.dueDate || t.due_date || '').toString();
+      if(f.from && dueStr && dueStr!=='NA' && dueStr < f.from) return false;
+      if(f.to && dueStr && dueStr!=='NA' && dueStr > f.to) return false;
+      if(Array.isArray(f.overdue) && f.overdue.length){
+        if(!dueStr || dueStr==='NA') return false;
+        const days = daysOverdue(dueStr);
+        if(days <= 0) return false; // not overdue
+        const match = f.overdue.some(code => (
+          (code==='over_1y' && days>365) ||
+          (code==='m3_1y' && days>=90 && days<=365) ||
+          (code==='m1_3m' && days>=30 && days<90) ||
+          (code==='lt_1m' && days>0 && days<30)
+        ));
+        if(!match) return false;
+      }
       return true;
+    });
+  }
+
+  function daysOverdue(due){
+    const raw = String(due);
+    const dt = new Date(raw);
+    if(isNaN(dt)) return 0;
+    const today = new Date();
+    const a = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const b = Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    return Math.floor((a - b) / (24*3600*1000));
+  }
+
+  function setupMultiSelects(){
+    const containers = qsa('.ms');
+    const closeAll = ()=>{ qsa('.ms-display.open').forEach(d=> d.classList.remove('open')); qsa('.ms-menu').forEach(m=> m.remove()); };
+    document.addEventListener('click', (e)=>{
+      if(!e.target.closest('.ms') && !e.target.closest('.ms-menu')) closeAll();
+    });
+    containers.forEach(box => {
+      const targetId = box.getAttribute('data-target');
+      const select = document.getElementById(targetId);
+      const display = box.querySelector('.ms-display');
+      if(!select || !display) return;
+      const labelFor = (id)=> ({ qCompany:'FC Name', qCategory:'Category', qCriticality:'Criticality', qOverdue:'Over due', qAssignee:'Maker', qChecker:'Checker', qStatus:'Status', xCompany:'FC Name', xCategory:'Category', xMaker:'Maker', xChecker:'Checker', xStatus:'Status', xOverdue:'Over due', dCompany:'FC Name', dCategory:'Category', dAssignee:'Maker', dChecker:'Checker', dStatus:'Status', dCriticality:'Criticality', dOverdue:'Over due' }[id]||'Select');
+      const updateText = ()=>{
+        const rawOpts = Array.from(select.selectedOptions).filter(o=>o.value);
+        const labels = rawOpts.map(o=> (o.textContent||'').trim()).filter(Boolean);
+        if(!labels.length) display.textContent = 'All';
+        else if(labels.length<=2) display.textContent = labels.join(', ');
+        else display.textContent = `${labels.length} selected`;
+      };
+      updateText();
+      display.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const already = document.querySelector('.ms-menu'); if(already) already.remove();
+        display.classList.add('open');
+        const menu = document.createElement('div'); menu.className='ms-menu';
+        const rect = display.getBoundingClientRect();
+        menu.style.top = `${rect.bottom + 6 + window.scrollY}px`;
+        menu.style.left = `${rect.left + window.scrollX}px`;
+        menu.style.minWidth = `${Math.max(220, rect.width)}px`;
+        // title
+        const head = document.createElement('div'); head.style.padding='4px 6px'; head.style.color='#94a3b8'; head.textContent = labelFor(targetId);
+        menu.appendChild(head);
+        // list
+        const list = document.createElement('div');
+        Array.from(select.options).forEach(opt => {
+          const val = opt.value;
+          if(val===''){ return; } // skip All virtual option in popup
+          const row = document.createElement('div'); row.className='ms-item';
+          const cb = document.createElement('input'); cb.type='checkbox'; cb.value=val; cb.checked = opt.selected;
+          const lb = document.createElement('span'); lb.textContent = opt.textContent;
+          row.appendChild(cb); row.appendChild(lb); list.appendChild(row);
+          // Toggle when clicking anywhere on the row or label
+          row.addEventListener('click', (e)=>{ e.stopPropagation(); cb.checked = !cb.checked; });
+          lb.addEventListener('click', (e)=>{ e.stopPropagation(); cb.checked = !cb.checked; });
+          cb.addEventListener('change', ()=>{});
+        });
+        menu.appendChild(list);
+        const actions = document.createElement('div'); actions.className='ms-actions';
+        const clr = document.createElement('button'); clr.type='button'; clr.className='btn'; clr.textContent='Clear'; clr.addEventListener('click', ()=>{
+          Array.from(select.options).forEach(o=> o.selected = false);
+          // Uncheck all in the floating menu visually as well
+          qsa('.ms-menu .ms-item input').forEach(i=>{ i.checked = false; });
+          updateText();
+          const form = el('searchForm'); if(form){ onSearch({ preventDefault:()=>{}, currentTarget: form }); }
+        });
+        const done = document.createElement('button'); done.type='button'; done.className='btn primary'; done.textContent='Apply'; done.addEventListener('click', ()=>{
+          const chosen = Array.from(menu.querySelectorAll('.ms-item input:checked')).map(x=>x.value);
+          Array.from(select.options).forEach(o=>{ o.selected = chosen.includes(o.value); });
+          updateText();
+          closeAll();
+          const form = el('searchForm'); if(form){ onSearch({ preventDefault:()=>{}, currentTarget: form }); }
+        });
+        actions.appendChild(clr); actions.appendChild(done); menu.appendChild(actions);
+        document.body.appendChild(menu);
+      });
     });
   }
 
@@ -1085,18 +1259,47 @@
     if(arr.length === 0){
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 9;
+      td.colSpan = 10;
       td.textContent = 'No compliances found. Use Add Compliance to create one.';
       tr.appendChild(td); tbody.appendChild(tr); return;
     }
     arr.forEach(t => {
       const tr = document.createElement('tr');
+      const selTd = document.createElement('td');
+      const cb = document.createElement('input'); cb.type='checkbox'; cb.className='row-check'; cb.value=String(t.id);
+      const isChecker = (t.checker && state.cachedMeName && t.checker===state.cachedMeName);
+      const checkerAllowed = isChecker && !!t.submitted_at;
+      if(!state.isAdmin && !checkerAllowed){ cb.disabled = true; cb.classList.add('disabled'); }
+      selTd.appendChild(cb); tr.appendChild(selTd);
       tr.appendChild(cellActions(t));
       tr.appendChild(tdText(t.company));
       tr.appendChild(tdText(t.category));
       tr.appendChild(tdText(t.title));
       const crit = (t.criticality||'').toString();
       tr.appendChild(tdText(crit ? crit.charAt(0).toUpperCase()+crit.slice(1).toLowerCase() : ''));
+      // Attachments column (eye menu)
+      const attTd = document.createElement('td');
+      const eyeWrap = document.createElement('div'); eyeWrap.style.position='relative';
+      const eyeBtn = document.createElement('button'); eyeBtn.className='btn icon eye'; eyeBtn.title='View attachments'; eyeBtn.textContent='👁'; eyeWrap.appendChild(eyeBtn);
+      const menu = document.createElement('div'); menu.style.position='absolute'; menu.style.background='#0b1220'; menu.style.border='1px solid #334155'; menu.style.borderRadius='8px'; menu.style.padding='4px'; menu.style.display='none'; menu.style.zIndex='5'; menu.style.right='0'; menu.style.top='100%';
+      const docBtn = document.createElement('button'); docBtn.className='btn icon'; docBtn.textContent='Document'; docBtn.addEventListener('click', ()=> openFirstAttachmentPreview(t.id, false)); menu.appendChild(docBtn);
+      const fcBtn = document.createElement('button'); fcBtn.className='btn icon'; fcBtn.textContent='FC Image'; fcBtn.addEventListener('click', ()=> openFirstAttachmentPreview(t.id, true)); menu.appendChild(fcBtn);
+      eyeWrap.appendChild(menu); attTd.appendChild(eyeWrap); tr.appendChild(attTd);
+      eyeBtn.addEventListener('click', async (ev)=>{
+        const hasFc = await taskHasFcImage(t.id); const hasDoc = await taskHasGeneralDoc(t.id);
+        if(hasFc){
+          ev.stopPropagation();
+          const wasOpen = (menu.style.display==='block');
+          // close any other open menus
+          document.querySelectorAll('.eye-menu-open').forEach(m=>{ if(m!==menu) { m.style.display='none'; m.classList.remove('eye-menu-open'); } });
+          menu.style.display = wasOpen ? 'none' : 'block';
+          if(!wasOpen){ menu.classList.add('eye-menu-open'); }
+        }
+        else if(hasDoc){ openFirstAttachmentPreview(t.id, false); }
+        else { toast('No attachments'); }
+      });
+      // Close on outside click
+      document.addEventListener('click', (e)=>{ if(menu.style.display==='block'){ const within = (e.target===menu) || menu.contains(e.target) || (e.target===eyeBtn) || eyeBtn.contains(e.target); if(!within){ menu.style.display='none'; menu.classList.remove('eye-menu-open'); } } });
       const due = t.dueDate || t.due_date;
       tr.appendChild(tdText(formatRelativeDue(due)));
     tr.appendChild(tdText(t.assignee||''));
@@ -1104,14 +1307,39 @@
       tr.appendChild(tdText(cap((t.status||'').replace('aborted','rejected'))));
       tbody.appendChild(tr);
     });
+    const bulkToggle = role==='to-me' ? document.getElementById('bulkCheckAll') : document.getElementById('bulkCheckAllBy');
+    if(bulkToggle){ bulkToggle.checked = false; bulkToggle.onclick = ()=>{ qsa(`#${tbody.id} .row-check:not(.disabled)`).forEach(cb => { if(!cb.disabled) cb.checked = bulkToggle.checked; }); updateBulkInlineBar(); }; }
+    qsa(`#${tbody.id} .row-check`).forEach(cb => cb.addEventListener('change', updateBulkInlineBar));
   }
+
+  function selectedIds(){ return Array.from(qsa('#listForMe .row-check:checked, #listByMe .row-check:checked')).map(cb => Number(cb.value)); }
+  function updateBulkInlineBar(){
+    const ids = selectedIds();
+    let bar = document.getElementById('bulkInlineBar');
+    const container = document.querySelector('.table-wrap');
+    if(ids.length >= 2){
+      if(!bar){
+        bar = document.createElement('div'); bar.id='bulkInlineBar'; bar.style.display='flex'; bar.style.gap='8px'; bar.style.margin='6px 0';
+        const c = document.createElement('button'); c.className='btn'; c.textContent='✓ Complete'; c.addEventListener('click', ()=>{ bulkStatus(selectedIds(), 'completed'); hideBulkInlineBar(); }); bar.appendChild(c);
+        const r = document.createElement('button'); r.className='btn'; r.textContent='✕ Reject'; r.addEventListener('click', ()=>{ bulkStatus(selectedIds(), 'rejected'); hideBulkInlineBar(); }); bar.appendChild(r);
+        if(container && container.parentElement){ container.parentElement.insertBefore(bar, container); }
+      }
+      bar.style.display = 'flex';
+    } else if(bar){ hideBulkInlineBar(); }
+  }
+  function hideBulkInlineBar(){ const bar = document.getElementById('bulkInlineBar'); if(bar) bar.style.display='none'; }
 
   // Export/Import
   async function onExportCsv(){
     if(!sessionStorage.getItem('cf_token')) return toast('API mode required');
     const url = new URL('/api/tasks/export', location.origin);
     // Build params from export filters if present; else fall back to current state.filters
-    const get = id => (document.getElementById(id)||{value:''}).value;
+    const get = id => {
+      const node = document.getElementById(id);
+      if(!node) return '';
+      if(node.multiple){ return Array.from(node.selectedOptions).map(o=>o.value).filter(Boolean).join(','); }
+      return node.value;
+    };
     const hasExportForm = !!document.getElementById('exportFilters');
     const params = hasExportForm ? {
       title: get('xTitle').trim(),
@@ -1121,16 +1349,18 @@
       company_id: get('xCompany'),
       status: get('xStatus'),
       from: get('xFrom'),
-      to: get('xTo')
+      to: get('xTo'),
+      overdue: get('xOverdue')
     } : {
       title: state.filters.title || '',
-      maker: state.filters.assignee || '',
-      checker: state.filters.checker || '',
-      category_id: state.filters.category_id || '',
-      company_id: state.filters.company_id || '',
-      status: state.filters.status || '',
+      maker: Array.isArray(state.filters.assignee)? state.filters.assignee.join(',') : (state.filters.assignee||''),
+      checker: Array.isArray(state.filters.checker)? state.filters.checker.join(',') : (state.filters.checker||''),
+      category: Array.isArray(state.filters.category)? state.filters.category.join(',') : (state.filters.category||''),
+      company: Array.isArray(state.filters.company)? state.filters.company.join(',') : (state.filters.company||''),
+      status: Array.isArray(state.filters.status)? state.filters.status.join(',') : (state.filters.status||''),
       from: state.filters.from || '',
-      to: state.filters.to || ''
+      to: state.filters.to || '',
+      overdue: Array.isArray(state.filters.overdue)? state.filters.overdue.join(',') : (state.filters.overdue||'')
     };
     Object.entries(params).forEach(([k,v]) => { if(v) url.searchParams.set(k, v); });
     const token = sessionStorage.getItem('cf_token');
@@ -1349,16 +1579,48 @@
 
   function cellActions(t){
     const td = document.createElement('td');
-    const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.gap='6px';
-    const edit = document.createElement('button');
-    edit.className = 'btn';
-    edit.textContent = 'Edit';
-    edit.addEventListener('click', () => openEditor(t.id));
-    wrap.appendChild(edit);
-    const markBtn = document.createElement('button'); markBtn.className='btn'; markBtn.title='Mark completed'; markBtn.textContent='✓'; markBtn.addEventListener('click', ()=> bulkStatus([t.id], 'completed')); wrap.appendChild(markBtn);
-    const rejectBtn = document.createElement('button'); rejectBtn.className='btn'; rejectBtn.title='Reject'; rejectBtn.textContent='✕'; rejectBtn.addEventListener('click', ()=> bulkStatus([t.id], 'rejected')); wrap.appendChild(rejectBtn);
+    const wrap = document.createElement('div'); wrap.style.display='flex'; wrap.style.gap='4px';
+    const canAct = (()=>{
+      const isChecker = (t.checker && state.cachedMeName && t.checker===state.cachedMeName);
+      const checkerAllowed = isChecker && !!t.submitted_at;
+      return !!(state.isAdmin || checkerAllowed);
+    })();
+    if(canAct){
+      const markBtn = document.createElement('button'); markBtn.className='btn icon success'; markBtn.title='Mark completed'; markBtn.textContent='✓'; markBtn.addEventListener('click', ()=> bulkStatus([t.id], 'completed')); wrap.appendChild(markBtn);
+      const rejectBtn = document.createElement('button'); rejectBtn.className='btn icon reject'; rejectBtn.title='Reject'; rejectBtn.textContent='✕'; rejectBtn.addEventListener('click', ()=> bulkStatus([t.id], 'rejected')); wrap.appendChild(rejectBtn);
+    }
+    const edit = document.createElement('button'); edit.className = 'btn icon edit'; edit.title = 'Edit'; edit.textContent = '✎'; edit.addEventListener('click', () => openEditor(t.id)); wrap.appendChild(edit);
     td.appendChild(wrap);
     return td;
+  }
+
+  async function taskHasFcImage(taskId){
+    if(!sessionStorage.getItem('cf_token')) return false;
+    try{
+      const d = await api.get(taskId);
+      const atts = (d && d.attachments) || [];
+      return atts.some(a => String(a.file_name||'').includes('__fc_image'));
+    }catch(_e){ return false; }
+  }
+  async function taskHasGeneralDoc(taskId){
+    if(!sessionStorage.getItem('cf_token')) return false;
+    try{
+      const d = await api.get(taskId);
+      const atts = (d && d.attachments) || [];
+      return atts.some(a => !String(a.file_name||'').includes('__fc_image'));
+    }catch(_e){ return false; }
+  }
+  async function openFirstAttachmentPreview(taskId, fc){
+    if(!sessionStorage.getItem('cf_token')){ toast('Login required'); return; }
+    try{
+      const d = await api.get(taskId);
+      const token = sessionStorage.getItem('cf_token');
+      const atts = (d && d.attachments) || [];
+      const first = atts.find(a => fc ? String(a.file_name||'').includes('__fc_image') : !String(a.file_name||'').includes('__fc_image'));
+      if(!first){ toast('No attachment found'); return; }
+      const url = `/attachments/${first.id}${token? `?token=${encodeURIComponent(token)}`: ''}`;
+      window.open(url, '_blank');
+    }catch(_e){ toast('Failed to open'); }
   }
   function bulkStatus(ids, status){
     if(!ids || ids.length===0) return;
@@ -1389,7 +1651,7 @@
     const errors = [];
     if(!title) errors.push('Title is required');
     if(!categoryId || categoryId==='__ADD__') errors.push('Category is required');
-    if(!companyId || companyId==='__ADD__') errors.push('Location / Site is required');
+    if(!companyId || companyId==='__ADD__') errors.push('FC Name is required');
     // In edit mode, maker is assigned by admin; do not block on empty select
     if(!assignee && !id) errors.push('Maker is required');
     // allow N/A due date by leaving it blank
@@ -1414,7 +1676,7 @@
     }
     const fileInput = el('fFiles');
     const fcImageInput = el('fFcImage');
-    const generalNewFiles = (fileInput && fileInput.files) ? Array.from(fileInput.files) : [];
+    let generalNewFiles = (fileInput && fileInput.files) ? Array.from(fileInput.files) : [];
     const fcNewFiles = (fcImageInput && fcImageInput.files) ? Array.from(fcImageInput.files) : [];
     // Allow only images, pdf, doc/docx, xls/xlsx, csv
     const allowedTypes = [
@@ -1432,6 +1694,7 @@
     };
     for(const f of generalNewFiles){ if(!isAllowed(f)) return toast(`File type not allowed: ${f.name}`); }
     for(const f of fcNewFiles){ if(!isAllowed(f)) return toast(`File type not allowed: ${f.name}`); }
+    if(generalNewFiles.length > 1){ generalNewFiles = generalNewFiles.slice(0,1); toast('Only one general attachment allowed'); }
     const newGeneralCount = generalNewFiles.length;
     const newFcCount = fcNewFiles.length;
     // If Displayed in FC is Yes, enforce at least one FC image ONLY when editing an existing task (skip for SuperAdmin)
@@ -1803,22 +2066,26 @@
   }
   async function renderDashboard(){
     const url = new URL('/api/dashboard', location.origin);
-    const s = (el('dStatus')||{value:''}).value||'';
-    const catId = (el('dCategory')||{value:''}).value||'';
-    const comId = (el('dCompany')||{value:''}).value||'';
-    const assignee = (el('dAssignee')||{value:''}).value||'';
-    const checker = (el('dChecker')||{value:''}).value||'';
-    const criticality = (el('dCriticality')||{value:''}).value||'';
+    const sel = (id)=>{ const n = el(id); if(!n) return []; if(n.multiple) return Array.from(n.selectedOptions).map(o=>o.value).filter(Boolean); return n.value? [n.value]: []; };
+    const s = sel('dStatus');
+    const cat = sel('dCategory');
+    const com = sel('dCompany');
+    const ass = sel('dAssignee');
+    const chk = sel('dChecker');
+    const crit = sel('dCriticality');
     const from = (el('dFrom')||{value:''}).value||'';
     const to = (el('dTo')||{value:''}).value||'';
-    if(s) url.searchParams.set('status', s);
-    if(catId) url.searchParams.set('category_id', catId);
-    if(comId) url.searchParams.set('company_id', comId);
-    if(assignee) url.searchParams.set('assignee', assignee);
-    if(checker) url.searchParams.set('checker', checker);
-    if(criticality) url.searchParams.set('criticality', criticality);
+    const overdue = sel('dOverdue');
+    const join = (arr)=> (Array.isArray(arr) && arr.length) ? arr.join(',') : '';
+    if(s.length) url.searchParams.set('status', join(s));
+    if(cat.length) url.searchParams.set('category_id', join(cat));
+    if(com.length) url.searchParams.set('company_id', join(com));
+    if(ass.length) url.searchParams.set('assignee', join(ass));
+    if(chk.length) url.searchParams.set('checker', join(chk));
+    if(crit.length) url.searchParams.set('criticality', join(crit));
     if(from) url.searchParams.set('from', from);
     if(to) url.searchParams.set('to', to);
+    if(overdue.length) url.searchParams.set('overdue', join(overdue));
     try{
       const r = await fetch(url, { headers:{ Authorization:`Bearer ${sessionStorage.getItem('cf_token')||''}` } });
       if(!r.ok){ drawDashboard(defaultDashboardData()); return; }
@@ -1889,6 +2156,12 @@
       }catch(_e){}
       return '';
     } } } }});
+
+    // Overdue buckets chart (server should provide counts by bucket keys)
+    const ov = data.overdueBuckets || { 'Over 1 Year':0, '3 Months – 1 Year':0, '1 – 3 Months':0, 'Less than 1 Month':0 };
+    const ovLabels = ['Over 1 Year','3 Months – 1 Year','1 – 3 Months','Less than 1 Month'];
+    const ovData = ovLabels.map(k => Number(ov[k]||0));
+    upsertChart('dbOverdueBuckets', 'bar', { labels: ovLabels, datasets:[{ label:'Count', data: ovData, backgroundColor:'#ef4444' }] }, { responsive:true, maintainAspectRatio:false, scales:{ x:{ stacked:false, ticks:{ autoSkip:false } }, y:{ beginAtZero:true } }, plugins:{ tooltip:{ callbacks:{ label: tooltipLabelOnlyCount } } } });
 
     // Status chart with per-criticality breakdown in tooltip (Pending/Completed only)
     const cstat = data.criticalityStatus||{ high:{}, medium:{}, low:{}, unknown:{} };

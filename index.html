@@ -58,57 +58,89 @@
           </div>
         </header>
 
-        <div id="searchPanel" class="search-panel one-line">
+        <div id="searchPanel" class="search-panel two-line">
           <form id="searchForm" class="grid one-line" aria-label="Filter compliances">
-            <div class="grid-actions left">
-              <button class="btn" type="reset" id="resetFilters">Reset</button>
-            </div>
             <label>
-              <span>Title</span>
-              <input id="qTitle" name="title" type="text" placeholder="Search title">
-            </label>
-            <label>
-              <span>Maker</span>
-              <select id="qAssignee" name="assignee">
-                <option value="">All</option>
-              </select>
-            </label>
-            <label>
-              <span>Checker</span>
-              <select id="qChecker" name="checker">
-                <option value="">All</option>
-              </select>
+              <span>FC Name</span>
+              <div class="ms" data-target="qCompany">
+                <div class="ms-display" id="ms_qCompany">All</div>
+                <select id="qCompany" name="company" multiple size="1"><option value="">All</option></select>
+              </div>
             </label>
             <label>
               <span>Category</span>
-              <select id="qCategory" name="category">
-                <option value="">All</option>
-              </select>
+              <div class="ms" data-target="qCategory">
+                <div class="ms-display" id="ms_qCategory">All</div>
+                <select id="qCategory" name="category" multiple size="1"><option value="">All</option></select>
+              </div>
             </label>
             <label>
-              <span>Location / Site</span>
-              <select id="qCompany" name="company">
-                <option value="">All</option>
-              </select>
+              <span>Title</span>
+              <input id="qTitle" name="title" type="text" placeholder="Search title" list="qTitleList">
+              <datalist id="qTitleList"></datalist>
             </label>
             <label>
-              <span>From</span>
+              <span>Criticality</span>
+              <div class="ms" data-target="qCriticality">
+                <div class="ms-display" id="ms_qCriticality">All</div>
+                <select id="qCriticality" name="criticality" multiple size="1">
+                  <option value="">All</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+              </select>
+              </div>
+            </label>
+            <label>
+              <span>Due From</span>
               <input id="qFrom" name="from" type="date">
             </label>
             <label>
-              <span>To</span>
+              <span>Due To</span>
               <input id="qTo" name="to" type="date">
             </label>
             <label>
+              <span>Over due</span>
+              <div class="ms" data-target="qOverdue">
+                <div class="ms-display" id="ms_qOverdue">All</div>
+                <select id="qOverdue" name="overdue" multiple size="1">
+                  <option value="">All</option>
+                  <option value="over_1y">Over 1 Year</option>
+                  <option value="m3_1y">3 Months – 1 Year</option>
+                  <option value="m1_3m">1 – 3 Months</option>
+                  <option value="lt_1m">Less than 1 Month</option>
+                </select>
+              </div>
+            </label>
+            <label>
+              <span>Maker</span>
+              <div class="ms" data-target="qAssignee">
+                <div class="ms-display" id="ms_qAssignee">All</div>
+                <select id="qAssignee" name="assignee" multiple size="1"><option value="">All</option></select>
+              </div>
+            </label>
+            <label>
+              <span>Checker</span>
+              <div class="ms" data-target="qChecker">
+                <div class="ms-display" id="ms_qChecker">All</div>
+                <select id="qChecker" name="checker" multiple size="1"><option value="">All</option></select>
+              </div>
+            </label>
+            <label>
               <span>Status</span>
-              <select id="qStatus" name="status">
-                <option value="">All</option>
+              <div class="ms" data-target="qStatus">
+                <div class="ms-display" id="ms_qStatus">All</div>
+                <select id="qStatus" name="status" multiple size="1">
+                  <option value="">All</option>
                 <option value="pending">Pending</option>
                 <option value="completed">Completed</option>
-                <option value="rejected">Rejected</option>
+                  <option value="rejected">Rejected</option>
               </select>
+              </div>
             </label>
-            
+            <div class="grid-actions" style="grid-column:5; grid-row:2; justify-self:start">
+              <button class="btn" type="reset" id="resetFilters">Reset</button>
+            </div>
           </form>
         </div>
 
@@ -121,10 +153,11 @@
                   <tr>
                     <th scope="col"><label class="sr-only" for="bulkCheckAll">Select all</label><input id="bulkCheckAll" type="checkbox"></th>
                     <th scope="col">Action</th>
-                    <th scope="col"><button class="th-sort" data-sort="company">Location / Site</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="company">FC Name</button></th>
                     <th scope="col"><button class="th-sort" data-sort="category">Category</button></th>
                     <th scope="col"><button class="th-sort" data-sort="title">Title</button></th>
                     <th scope="col">Criticality</th>
+                    <th scope="col">Attachments</th>
                     <th scope="col"><button class="th-sort" data-sort="dueDate">Due Date</button></th>
                     <th scope="col"><button class="th-sort" data-sort="assignee">Maker</button></th>
                     <th scope="col">Checker</th>
@@ -141,11 +174,13 @@
                 <caption id="byMeSummary" class="sr-only">Other compliances</caption>
                 <thead>
                   <tr>
+                    <th scope="col"><label class="sr-only" for="bulkCheckAllBy">Select all</label><input id="bulkCheckAllBy" type="checkbox"></th>
                     <th scope="col">Action</th>
-                    <th scope="col"><button class="th-sort" data-sort="company">Location / Site</button></th>
+                    <th scope="col"><button class="th-sort" data-sort="company">FC Name</button></th>
                     <th scope="col"><button class="th-sort" data-sort="category">Category</button></th>
                     <th scope="col"><button class="th-sort" data-sort="title">Title</button></th>
                     <th scope="col">Criticality</th>
+                    <th scope="col">Attachments</th>
                     <th scope="col"><button class="th-sort" data-sort="dueDate">Due Date</button></th>
                     <th scope="col"><button class="th-sort" data-sort="assignee">Maker</button></th>
                     <th scope="col">Checker</th>
@@ -183,7 +218,7 @@
             </label>
 
             <label>
-              <span>Location / Site *</span>
+              <span>FC Name *</span>
               <select id="fCompany" required></select>
             </label>
 
@@ -265,7 +300,7 @@
 
             <div class="span-2 attachment">
               <span>Attachments</span>
-              <input id="fFiles" type="file" multiple aria-describedby="fileHelp">
+              <input id="fFiles" type="file" aria-describedby="fileHelp">
               <small id="fileHelp">Total size should not exceed 5MB</small>
               <div id="filePreview" class="file-preview" aria-live="polite"></div>
               <div id="fileList" class="file-preview" aria-live="polite"></div>
@@ -377,28 +412,43 @@
             </label>
             <label>
               <span>Maker</span>
-              <select id="xMaker"><option value="">All</option></select>
+              <div class="ms" data-target="xMaker">
+                <div class="ms-display" id="ms_xMaker">All</div>
+                <select id="xMaker" multiple size="1"><option value="">All</option></select>
+              </div>
             </label>
             <label>
               <span>Checker</span>
-              <select id="xChecker"><option value="">All</option></select>
+              <div class="ms" data-target="xChecker">
+                <div class="ms-display" id="ms_xChecker">All</div>
+                <select id="xChecker" multiple size="1"><option value="">All</option></select>
+              </div>
             </label>
             <label>
               <span>Category</span>
-              <select id="xCategory"><option value="">All</option></select>
+              <div class="ms" data-target="xCategory">
+                <div class="ms-display" id="ms_xCategory">All</div>
+                <select id="xCategory" multiple size="1"><option value="">All</option></select>
+              </div>
             </label>
             <label>
-              <span>Location / Site</span>
-              <select id="xCompany"><option value="">All</option></select>
+              <span>FC Name</span>
+              <div class="ms" data-target="xCompany">
+                <div class="ms-display" id="ms_xCompany">All</div>
+                <select id="xCompany" multiple size="1"><option value="">All</option></select>
+              </div>
             </label>
             <label>
               <span>Status</span>
-              <select id="xStatus">
-                <option value="">All</option>
-                <option value="pending">Pending</option>
-                <option value="completed">Completed</option>
-                <option value="rejected">Rejected</option>
-              </select>
+              <div class="ms" data-target="xStatus">
+                <div class="ms-display" id="ms_xStatus">All</div>
+                <select id="xStatus" multiple size="1">
+                  <option value="">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="completed">Completed</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
             </label>
             <label>
               <span>Due From</span>
@@ -407,6 +457,19 @@
             <label>
               <span>Due To</span>
               <input id="xTo" type="date">
+            </label>
+            <label>
+              <span>Over due</span>
+              <div class="ms" data-target="xOverdue">
+                <div class="ms-display" id="ms_xOverdue">All</div>
+                <select id="xOverdue" multiple size="1">
+                  <option value="">All</option>
+                  <option value="over_1y">Over 1 Year</option>
+                  <option value="m3_1y">3 Months – 1 Year</option>
+                  <option value="m1_3m">1 – 3 Months</option>
+                  <option value="lt_1m">Less than 1 Month</option>
+                </select>
+              </div>
             </label>
             <div class="grid-actions">
               <button id="exportCsv" class="btn primary" type="button">Download CSV</button>
@@ -425,40 +488,58 @@
           </div>
         </header>
         <div style="padding:16px">
-          <form id="dashboardFilters" class="grid" style="grid-template-columns:repeat(3,1fr)">
+          <form id="dashboardFilters" class="grid two-line" style="grid-template-columns: repeat(6, 1fr)" aria-label="Dashboard filters">
             <label>
               <span>Status</span>
-              <select id="dStatus">
-                <option value="">All</option>
-                <option value="pending">Pending</option>
-                <option value="completed">Completed</option>
-                <option value="rejected">Rejected</option>
-              </select>
+              <div class="ms" data-target="dStatus">
+                <div class="ms-display" id="ms_dStatus">All</div>
+                <select id="dStatus" multiple size="1">
+                  <option value="">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="completed">Completed</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
             </label>
             <label>
               <span>Category</span>
-              <select id="dCategory"></select>
+              <div class="ms" data-target="dCategory">
+                <div class="ms-display" id="ms_dCategory">All</div>
+                <select id="dCategory" multiple size="1"></select>
+              </div>
             </label>
             <label>
-              <span>Location / Site</span>
-              <select id="dCompany"></select>
+              <span>FC Name</span>
+              <div class="ms" data-target="dCompany">
+                <div class="ms-display" id="ms_dCompany">All</div>
+                <select id="dCompany" multiple size="1"></select>
+              </div>
             </label>
             <label>
               <span>Maker</span>
-              <select id="dAssignee"></select>
+              <div class="ms" data-target="dAssignee">
+                <div class="ms-display" id="ms_dAssignee">All</div>
+                <select id="dAssignee" multiple size="1"></select>
+              </div>
             </label>
             <label>
               <span>Checker</span>
-              <select id="dChecker"></select>
+              <div class="ms" data-target="dChecker">
+                <div class="ms-display" id="ms_dChecker">All</div>
+                <select id="dChecker" multiple size="1"></select>
+              </div>
             </label>
             <label>
               <span>Criticality</span>
-              <select id="dCriticality">
-                <option value="">All</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
+              <div class="ms" data-target="dCriticality">
+                <div class="ms-display" id="ms_dCriticality">All</div>
+                <select id="dCriticality" multiple size="1">
+                  <option value="">All</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
             </label>
             <label>
               <span>Due From</span>
@@ -468,8 +549,20 @@
               <span>Due To</span>
               <input id="dTo" type="date">
             </label>
+            <label>
+              <span>Over due</span>
+              <div class="ms" data-target="dOverdue">
+                <div class="ms-display" id="ms_dOverdue">All</div>
+                <select id="dOverdue" multiple size="1">
+                  <option value="">All</option>
+                  <option value="over_1y">Over 1 Year</option>
+                  <option value="m3_1y">3 Months – 1 Year</option>
+                  <option value="m1_3m">1 – 3 Months</option>
+                  <option value="lt_1m">Less than 1 Month</option>
+                </select>
+              </div>
+            </label>
             <div class="grid-actions">
-              <button class="btn primary" type="submit">Apply</button>
               <button class="btn" type="reset" id="dReset">Reset</button>
             </div>
           </form>
@@ -482,17 +575,24 @@
           <div class="chart-grid">
             <div class="chart-card">
               <div class="chart-card-header">
-                <h3>Location / Site Health</h3>
+                <h3>FC Health</h3>
                 <button class="icon-btn chart-max" data-chart="dbOrgHealth" title="Maximize">⤢</button>
               </div>
               <div class="chart-canvas-wrap"><canvas id="dbOrgHealth"></canvas></div>
             </div>
             <div class="chart-card">
               <div class="chart-card-header">
-                <h3>Due Trend</h3>
+                <h3>Upcoming Due Trend</h3>
                 <button class="icon-btn chart-max" data-chart="dbBucketBar" title="Maximize">⤢</button>
               </div>
               <div class="chart-canvas-wrap"><canvas id="dbBucketBar"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-card-header">
+                <h3>Overdue Trend</h3>
+                <button class="icon-btn chart-max" data-chart="dbOverdueBuckets" title="Maximize">⤢</button>
+              </div>
+              <div class="chart-canvas-wrap"><canvas id="dbOverdueBuckets"></canvas></div>
             </div>
             <div class="chart-card">
               <div class="chart-card-header">
@@ -510,7 +610,7 @@
             </div>
             <div class="chart-card">
               <div class="chart-card-header">
-                <h3>By Location / Site</h3>
+                <h3>By FC Name</h3>
                 <button class="icon-btn chart-max" data-chart="dbCompanyBar" title="Maximize">⤢</button>
               </div>
               <div class="chart-canvas-wrap"><canvas id="dbCompanyBar"></canvas></div>
@@ -567,7 +667,7 @@
           <h3>Site Builder</h3>
           <form id="stdApplyForm" class="grid" style="grid-template-columns:repeat(2,1fr)">
             <label>
-              <span>Location / Site</span>
+              <span>FC Name</span>
               <select id="stdApplyCompany"></select>
             </label>
             <label class="inline-na">
@@ -683,4 +783,5 @@
   <script src="assets/js/app.js"></script>
 </body>
 </html>
+
 

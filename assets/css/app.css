@@ -1,3 +1,4 @@
+#panelDashboard .grid.two-line{grid-template-columns: repeat(6, 1fr); align-items:end; gap:6px}
 :root{
   --bg: #0f172a;
   --panel: #111827;
@@ -61,13 +62,22 @@ body{
 .btn.primary{background:linear-gradient(135deg, var(--accent), var(--accent-2)); border-color:transparent}
 .btn.secondary{background:#0b1220}
 .btn.danger{background:#1f2937; border-color:#ef4444; color:#fecaca}
+.btn.icon{padding:2px 6px; font-size:12px}
+.btn.icon.success{border-color: var(--success); color: var(--success); background:transparent}
+.btn.icon.reject{border-color: var(--danger); color: var(--danger); background:transparent}
+.btn.icon.edit{border-color: var(--accent); color: var(--text); background:transparent}
+.btn.icon.eye{border-color: #475569; color: var(--text); background:transparent}
 
-.search-panel{border-bottom:1px solid #1f2937; padding:12px 6px}
-.search-panel.one-line .grid{grid-template-columns: 50px 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.7fr 0.7fr 0.5fr; align-items:end; gap:10px}
+.search-panel{border-bottom:1px solid #1f2937; padding:8px 6px}
+.search-panel.one-line .grid{grid-template-columns: 0.7fr 0.7fr 0.5fr 0.5fr 0.5fr 0.5fr 0.5fr 0.6fr 0.4fr; align-items:end; gap:4px}
+.search-panel.two-line .grid{grid-template-columns: repeat(6, minmax(0,1fr)); gap:6px}
+.search-panel.two-line .grid .grid-actions{grid-column: 6; grid-row: 2; justify-self:end}
+.search-panel .grid > *{min-width:0}
+.search-panel select, .search-panel input{max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .search-panel.one-line .grid .grid-actions{justify-content:flex-start}
-.search-panel .grid label span{font-size:12px; margin-left:8px}
-.search-panel input, .search-panel select{padding:4px 6px; font-size:12px}
-.search-panel .btn{padding:4px 8px; font-size:12px}
+.search-panel .grid label span{font-size:13px; margin-left:8px}
+.search-panel input, .search-panel select{padding:4px 6px; font-size:13px}
+.search-panel .btn{padding:6px 10px; font-size:13px}
 .grid{display:grid; grid-template-columns:repeat(6, 1fr); gap:12px}
 .grid label{display:flex; flex-direction:column; gap:6px}
 .grid .span-2{grid-column: span 2}
@@ -108,7 +118,7 @@ input:focus, select:focus, textarea:focus{outline:none; box-shadow:0 0 0 3px var
 .note{background:#0b1220; border:1px solid #334155; border-radius:10px; padding:10px}
 .note .meta{color:var(--muted); font-size:12px}
 
-.toast{position:fixed; bottom:16px; right:16px; background:#111827; border:1px solid #334155; padding:10px 12px; border-radius:10px}
+.toast{position:fixed; top:10px; left:50%; transform:translateX(-50%); background:#111827; border:1px solid #334155; padding:12px 16px; border-radius:10px; z-index:1000}
 .sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
 
 /* Full-screen login overlay */
@@ -140,9 +150,23 @@ input[type="date"]:focus::-webkit-calendar-picker-indicator{
 .table-wrap{overflow-x:visible}
 .card .table-wrap + form{margin-top:12px}
 .table{min-width:0}
-/* Keep action column compact and wrap long titles to avoid horizontal scroll */
-.table th:first-child, .table td:first-child{width:84px}
+/* Keep selection + action columns compact and tight */
+.table th:first-child, .table td:first-child{width:34px}
+.table th:nth-child(2), .table td:nth-child(2){width:100px}
+.table td:nth-child(7){text-align:center}
 .table td:nth-child(4){white-space:normal; word-break:break-word}
+
+/* Custom multi-select dropdown */
+.ms{position:relative}
+.ms select{display:none}
+.ms-display{background:#0b1220; border:1px solid #334155; border-radius:10px; padding:6px 8px; cursor:pointer; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.ms-display.open{box-shadow:0 0 0 3px var(--ring)}
+.ms-menu{position:fixed; background:#0b1220; border:1px solid #334155; border-radius:10px; padding:6px; z-index:90; min-width:220px; max-height:240px; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.ms-item{display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px}
+.ms-item:hover{background:#111827}
+.ms-item input{accent-color:var(--accent)}
+.ms-actions{display:flex; justify-content:space-between; gap:8px; padding:6px}
+.ms-actions .btn{padding:4px 8px; font-size:12px}
 
 /* Compliances: use table area as scroll container; remove outer card scrollbar */
 .content > .card:first-of-type .tab-panels{flex:1 1 auto; overflow:hidden}
